@@ -685,7 +685,10 @@ by
     Set.mem_iUnion.2 ⟨S ω, Set.mem_iUnion.2 ⟨Finset.mem_powersetCard.2 ⟨fun i hiS =>
       Finset.mem_sdiff.2 ⟨by simp, fun hiT => (Finset.mem_filter.mp (hTsub hiT)).2 (hω.1 i hiS)⟩, h_card ω⟩, by simp⟩⟩
   have hμ_E_le_sum := (measure_mono hsubset).trans (MeasureTheory.measure_biUnion_finset_le (μ := μ) _ _)
-  have hUcard : U.card = k - (q + 1) := by simpa [hTcard, U] using Finset.card_sdiff (fun _ _ => by simp : T ⊆ Finset.univ)
+  have hUcard : U.card = k - (q + 1) := by
+    simp only [U]
+    convert_to (Finset.univ \ T).card = k - (q + 1)
+    simp [Finset.card_sdiff, hTcard, Fintype.card_fin]
   have hμ_E_le_ratio : μ E ≤ (Nat.choose (k - (q + 1)) s : ENNReal) / Nat.choose k s := by
     simpa [hUcard, c, nsmul_eq_mul, div_eq_mul_inv] using hμ_E_le_sum.trans (le_of_eq ((Finset.sum_congr rfl fun A hA => by simpa [c] using h_unif_S A (Finset.mem_powersetCard.1 hA).2).trans (Finset.sum_const c)))
   by_cases hden0 : Nat.choose k s = 0
@@ -711,224 +714,224 @@ by
     · simp [hi, h i hi]
     · simp [hi]
 
--- lemma sparsity_zero_composition
---     {α : Type*} [Semiring α] [DecidableEq α] [Zero α]
---     {m k : ℕ}
---     (G : Matrix (Fin m) (Fin k) α) {d : ℕ}
---     (hG : codeHasDistanceAtLeast G d)
---     {Ω : Type*} [MeasurableSpace Ω]
---     (μ : Measure Ω) [IsProbabilityMeasure μ]
---     (r : Ω → Fin m)
---     (h_unif_r : ∀ i : Fin m,
---       μ {ω | r ω = i} = (1 : ENNReal) / (m : ENNReal))
---     (S : Ω → Finset (Fin k)) (s : ℕ)
---     (h_card : ∀ ω, (S ω).card = s)
---     (h_unif_S :
---       ∀ A : Finset (Fin k), A.card = s →
---         μ {ω | S ω = A} =
---           (1 : ENNReal) / ((Nat.choose k s : ℕ) : ENNReal))
---     (h_indep :
---       ∀ i A,
---         μ {ω | r ω = i ∧ S ω = A}
---           = μ {ω | r ω = i} * μ {ω | S ω = A})
---     (x : Fin k → α) (q : ℕ) :
---     μ {ω |
---         (Matrix.mulVec G (fun i => if i ∈ S ω then x i else 0) (r ω) = 0)
---         ∧ ¬ ((Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card ≤ q)}
---       ≤ ENNReal.ofReal
---           ((1 - (d : ℝ) / (m : ℝ)) +
---            (1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s) :=
--- by
---   set y : Ω → (Fin k → α) := fun ω i => if i ∈ S ω then x i else 0
---   set E : Set Ω := {ω |
---       (Matrix.mulVec G (y ω) (r ω) = 0)
---       ∧ ¬ ((Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card ≤ q)}
---   by_cases hqk : q + 1 ≤ k
---   · by_cases hx_le : (Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card ≤ q
---     · have hμE : μ E = 0 := by simp [E, hx_le]
---       simp [hμE]
---     · have hx_ne : x ≠ 0 := by intro hx0; exact hx_le (by simp [hx0])
---       have hdx_le_m : d ≤ m := by
---         have h_ge := hG x hx_ne
---         have h_le :=
---           Finset.card_filter_le (Finset.univ : Finset (Fin m))
---             (fun i : Fin m => Matrix.mulVec G x i ≠ 0)
---         simpa [Fintype.card_fin] using h_ge.trans h_le
---       set E1 : Set Ω := {ω | Matrix.mulVec G (y ω) (r ω) = 0 ∧ y ω ≠ 0}
---       set E2 : Set Ω := {ω | y ω = 0 ∧ ¬ ((Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card ≤ q)}
---       have hμ_E_le : μ E ≤ μ E1 + μ E2 := by
---         refine (measure_mono ?_).trans (by simpa using measure_union_le E1 E2)
---         intro ω hω; rcases hω with ⟨hz, hnot⟩; by_cases hy : y ω = 0
---         · exact Or.inr ⟨hy, hnot⟩
---         · exact Or.inl ⟨hz, hy⟩
---       have hE2_le : μ E2 ≤ ENNReal.ofReal ((1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s) := by
---         simpa [E2, y, ZkLinalg.mask_eq_zero_iff_forall_mem] using
---           (mask_zero_uniform_subset_bound (μ := μ) (S := S) (s := s)
---             (h_card := h_card) (h_unif_S := h_unif_S) (x := x) (q := q))
---       set As : Finset (Finset (Fin k)) := (Finset.univ : Finset (Fin k)).powersetCard s
---       set yA : Finset (Fin k) → (Fin k → α) := fun A i => if i ∈ A then x i else 0
---       set Zset : Finset (Fin k) → Finset (Fin m) := fun A =>
---         (Finset.univ.filter (fun j : Fin m => Matrix.mulVec G (yA A) j = 0))
---       set AsNZ : Finset (Finset (Fin k)) := As.filter (fun A => yA A ≠ 0)
---       have E1_subset :
---           {ω | Matrix.mulVec G (y ω) (r ω) = 0 ∧ y ω ≠ 0}
---             ⊆ ⋃ A ∈ AsNZ, {ω | S ω = A ∧ r ω ∈ Zset A} := by
---         intro ω hω
---         have hA_mem_As : S ω ∈ As := by
---           refine (Finset.mem_powersetCard.2 ?_)
---           exact ⟨by intro i hi; simp, h_card ω⟩
---         have hy_eq : y ω = yA (S ω) := by funext i; simp [y, yA]
---         have hA_mem_AsNZ : S ω ∈ AsNZ := by
---           refine Finset.mem_filter.mpr ?_;
---           exact ⟨hA_mem_As, by simpa [hy_eq] using hω.2⟩
---         have hrZ : r ω ∈ Zset (S ω) := by
---           have : Matrix.mulVec G (yA (S ω)) (r ω) = 0 := by simpa [hy_eq] using hω.1
---           simpa [Zset] using this
---         refine Set.mem_iUnion.2 ?_;
---         refine ⟨S ω, ?_⟩; refine Set.mem_iUnion.2 ?_;
---         exact ⟨hA_mem_AsNZ, by simpa⟩
---       have hμ_union : μ {ω | Matrix.mulVec G (y ω) (r ω) = 0 ∧ y ω ≠ 0}
---           ≤ ∑ A ∈ AsNZ, μ {ω | S ω = A ∧ r ω ∈ Zset A} :=
---         (measure_mono E1_subset).trans (by
---           simpa using MeasureTheory.measure_biUnion_finset_le (μ := μ) AsNZ (fun A => {ω | S ω = A ∧ r ω ∈ Zset A}))
---       have h_indep' : ∀ (A : Finset (Fin k)) (j : Fin m),
---           μ {ω | S ω = A ∧ r ω = j}
---             = μ {ω | S ω = A} * μ {ω | r ω = j} := by
---         intro A j; simpa [and_comm, mul_comm] using h_indep j A
---       have h_indep_bound : ∀ {A : Finset (Fin k)}, A ∈ AsNZ →
---           μ {ω | S ω = A ∧ r ω ∈ Zset A}
---             ≤ μ {ω | S ω = A} * ∑ j ∈ Zset A, μ {ω | r ω = j} := by
---         intro A hA; simpa using
---           (ZkLinalg.measure_inter_preimage_finset_le_mul_sum (μ := μ)
---             (r := S) (r' := r) (h_indep := h_indep') (i := A) (A := Zset A))
---       have hsum_r_const : ∀ A : Finset (Fin k),
---           (∑ j ∈ Zset A, μ {ω | r ω = j})
---             = (Zset A).card • ((1 : ENNReal) / (m : ENNReal)) := by
---         intro A; simp [Finset.sum_congr rfl fun j hj => h_unif_r j, Finset.sum_const]
---       have hZ_le : ∀ {A : Finset (Fin k)}, A ∈ AsNZ → (Zset A).card ≤ m - d := by
---         intro A hA
---         have hy_ne : yA A ≠ 0 := (Finset.mem_filter.mp hA).2
---         simpa [Zset] using
---           (ZkLinalg.zero_positions_card_le_of_distance (G' := G) (hG' := hG)
---             (y := yA A) (hy := hy_ne))
---       have hμ_union_le : μ {ω | Matrix.mulVec G (y ω) (r ω) = 0 ∧ y ω ≠ 0}
---           ≤ ∑ A ∈ AsNZ,
---               μ {ω | S ω = A} *
---                 (((m - d : ℕ) : ENNReal) * ((1 : ENNReal) / (m : ENNReal))) := by
---         refine hμ_union.trans ?_
---         refine Finset.sum_le_sum (by
---           intro A hA
---           have h1 := h_indep_bound (A := A) hA
---           have hsum := hsum_r_const A
---           have hsum_le :
---               (∑ j ∈ Zset A, μ {ω | r ω = j})
---                 ≤ ((m - d : ℕ) : ENNReal) *
---                     ((1 : ENNReal) / (m : ENNReal)) := by
---             have : ((Zset A).card : ENNReal) ≤ ((m - d : ℕ) : ENNReal) := by exact_mod_cast hZ_le hA
---             simpa [hsum, nsmul_eq_mul] using mul_le_mul' this le_rfl
---           exact (le_trans h1 (mul_le_mul_left' hsum_le _)))
---       let C : ENNReal := (((m - d : ℕ) : ENNReal) * ((1 : ENNReal) / (m : ENNReal)))
---       have h1 : μ E1 ≤ ∑ A ∈ AsNZ, μ {ω | S ω = A} * C := by simpa [E1, C] using hμ_union_le
---       have h2 : (∑ A ∈ AsNZ, μ {ω | S ω = A} * C) = C * (∑ A ∈ AsNZ, μ {ω | S ω = A}) := by
---         simpa [C, mul_comm, mul_left_comm, mul_assoc] using
---           (Finset.sum_mul (s := AsNZ) (f := fun A : Finset (Fin k) => μ {ω | S ω = A}) (a := C)).symm
---       have hsum_AsNZ_le_As :
---           (∑ A ∈ AsNZ, μ {ω | S ω = A}) ≤ (∑ A ∈ As, μ {ω | S ω = A}) := by
---         have hrepr :
---             (∑ A ∈ AsNZ, μ {ω | S ω = A})
---               = ∑ A ∈ As, (if yA A = 0 then 0 else μ {ω | S ω = A}) := by
---           simp [AsNZ, Finset.sum_filter, ite_not]
---         have hpoint : ∀ A ∈ As,
---             (if yA A = 0 then 0 else μ {ω | S ω = A}) ≤ μ {ω | S ω = A} := by
---           intro A hA; by_cases h : yA A = 0 <;> simp [h]
---         simpa [hrepr] using
---           (Finset.sum_le_sum fun A hA => hpoint A hA)
---       have h_unif_const : ∀ A ∈ As,
---           μ {ω | S ω = A} = (1 : ENNReal) / ((Nat.choose k s : ℕ) : ENNReal) := by
---         intro A hA; simpa using h_unif_S A ((Finset.mem_powersetCard.1 hA).2)
---       have hsum_As :
---           (∑ A ∈ As, μ {ω | S ω = A})
---             = As.card • ((1 : ENNReal) / ((Nat.choose k s : ℕ) : ENNReal)) := by
---         simp [Finset.sum_congr rfl fun A hA => h_unif_const A hA, Finset.sum_const]
---       have hAs_card : As.card = Nat.choose k s := by
---         simp [As, Finset.card_univ, Fintype.card_fin]
---       have hsum_As_le_one : (∑ A ∈ As, μ {ω | S ω = A}) ≤ 1 := by
---         have hrepr :
---             (∑ A ∈ As, μ {ω | S ω = A}) = ((Nat.choose k s : ENNReal) * ((Nat.choose k s : ENNReal))⁻¹) := by
---           simp [hsum_As, hAs_card, nsmul_eq_mul, div_eq_mul_inv]
---         by_cases hc0 : Nat.choose k s = 0
---         · have : (∑ A ∈ As, μ {ω | S ω = A}) = 0 := by simp [hrepr, hc0]
---           simp [this]
---         · have hpos : ((Nat.choose k s : ℕ) : ENNReal) ≠ 0 := by
---             exact_mod_cast (ne_of_gt (Nat.pos_of_ne_zero hc0))
---           have hTop : ((Nat.choose k s : ℕ) : ENNReal) ≠ (⊤ : ENNReal) := by simp
---           have hmul : ((Nat.choose k s : ENNReal) * ((Nat.choose k s : ENNReal))⁻¹) = 1 :=
---             ENNReal.mul_inv_cancel hpos hTop
---           simp [hrepr, hmul]
---       have hsum_AsNZ_le_one : (∑ A ∈ AsNZ, μ {ω | S ω = A}) ≤ 1 := hsum_AsNZ_le_As.trans hsum_As_le_one
---       have hE1_div : μ E1 ≤ (((m - d : ℕ) : ENNReal) / (m : ENNReal)) := by
---         have h3 : μ E1 ≤ C * (∑ A ∈ AsNZ, μ {ω | S ω = A}) := by simpa [h2] using h1
---         have h4 : μ E1 ≤ C * 1 := h3.trans (mul_le_mul_left' hsum_AsNZ_le_one _)
---         simpa [E1, C, div_eq_mul_inv, one_mul] using h4
---       have hE1_le : μ E1 ≤ ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ)) := by
---         by_cases hm0 : m = 0
---         · have hof : ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ)) = 1 := by
---             have : (m : ℝ) = 0 := by simpa using congrArg (fun n : ℕ => (n : ℝ)) hm0
---             simp [this]
---           have hμ_le_one : μ E1 ≤ 1 := by
---             have : E1 ⊆ (Set.univ : Set Ω) := by intro ω _; trivial
---             simpa [E1] using (measure_mono this : μ E1 ≤ μ (Set.univ : Set Ω))
---           exact hμ_le_one.trans (by simp [hof])
---         · have hm_pos : 0 < (m : ℝ) := by exact_mod_cast Nat.pos_of_ne_zero hm0
---           have hm_ne : (m : ℝ) ≠ 0 := ne_of_gt hm_pos
---           have h_cast_add : (((m - d : ℕ) : ℝ) + (d : ℝ)) = (m : ℝ) := by
---             simpa [Nat.cast_add] using congrArg (fun t : ℕ => (t : ℝ)) (Nat.sub_add_cancel hdx_le_m)
---           have h_cast_sub : ((m - d : ℕ) : ℝ) = (m : ℝ) - (d : ℝ) :=
---             (eq_sub_iff_add_eq).2 (by simpa [add_comm] using h_cast_add)
---           have h_ofReal_eq_div :
---               ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ))
---                 = ((m - d : ℕ) : ENNReal) / (m : ENNReal) := by
---             have h1 : ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ))
---                 = ENNReal.ofReal (((m - d : ℕ) : ℝ) / (m : ℝ)) := by
---               simp [one_sub_div (K := ℝ) (a := (d : ℝ)) (b := (m : ℝ)) hm_ne, h_cast_sub]
---             have h2 : ENNReal.ofReal (((m - d : ℕ) : ℝ) / (m : ℝ))
---                 = ENNReal.ofReal ((m - d : ℕ) : ℝ) / (m : ENNReal) := by
---               simpa using ENNReal.ofReal_div_of_pos (x := ((m - d : ℕ) : ℝ)) (y := (m : ℝ)) hm_pos
---             have h3 : ENNReal.ofReal ((m - d : ℕ) : ℝ) = ((m - d : ℕ) : ENNReal) := by simp
---             simp [h1, h2, h3]
---           exact hE1_div.trans (by simp [h_ofReal_eq_div])
---       have hfinal' :
---           μ E ≤ ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ)) + ENNReal.ofReal ((1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s) :=
---         hμ_E_le.trans (add_le_add hE1_le hE2_le)
---       have hnonneg1 : 0 ≤ 1 - (d : ℝ) / (m : ℝ) := by
---         by_cases hm0 : m = 0
---         · simp [hm0]
---         · have : (d : ℝ) ≤ (m : ℝ) := by exact_mod_cast hdx_le_m
---           have hm0' : 0 ≤ (m : ℝ) := by exact_mod_cast (Nat.zero_le m)
---           have : (d : ℝ) / (m : ℝ) ≤ 1 := by
---             simpa using (div_le_one_of_le₀ (a := (d : ℝ)) (b := (m : ℝ)) this hm0')
---           exact sub_nonneg.mpr this
---       have hnonneg2 : 0 ≤ (1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s := by
---         have : (q + 1 : ℝ) ≤ (k : ℝ) := by exact_mod_cast hqk
---         have hk0 : 0 ≤ (k : ℝ) := by exact_mod_cast (Nat.zero_le k)
---         have : (q + 1 : ℝ) / (k : ℝ) ≤ 1 := by
---           simpa using (div_le_one_of_le₀ (a := (q + 1 : ℝ)) (b := (k : ℝ)) this hk0)
---         exact pow_nonneg (sub_nonneg.mpr this) _
---       have hsum_ofReal :
---           ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ)) + ENNReal.ofReal ((1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s)
---             = ENNReal.ofReal ((1 - (d : ℝ) / (m : ℝ)) + (1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s) := by
---         simp [ENNReal.ofReal_add, hnonneg1, hnonneg2]
---       simpa [E, hsum_ofReal] using hfinal'
---   · have hk_le_q : k ≤ q := Nat.le_of_lt_succ (by simpa [Nat.succ_eq_add_one] using hqk)
---     have h_support_le_q :
---         (Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card ≤ q :=
---       (le_trans
---         (by
---           simpa [Fintype.card_fin] using
---             (Finset.card_le_univ (Finset.univ.filter (fun i : Fin k => x i ≠ 0))))
---         hk_le_q)
---     have hμE : μ E = 0 := by simp [E, h_support_le_q]
---     simp [hμE]
+lemma sparsity_zero_composition
+    {α : Type*} [Semiring α] [DecidableEq α] [Zero α]
+    {m k : ℕ}
+    (G : Matrix (Fin m) (Fin k) α) {d : ℕ}
+    (hG : codeHasDistanceAtLeast G d)
+    {Ω : Type*} [MeasurableSpace Ω]
+    (μ : Measure Ω) [IsProbabilityMeasure μ]
+    (r : Ω → Fin m)
+    (h_unif_r : ∀ i : Fin m,
+      μ {ω | r ω = i} = (1 : ENNReal) / (m : ENNReal))
+    (S : Ω → Finset (Fin k)) (s : ℕ)
+    (h_card : ∀ ω, (S ω).card = s)
+    (h_unif_S :
+      ∀ A : Finset (Fin k), A.card = s →
+        μ {ω | S ω = A} =
+          (1 : ENNReal) / ((Nat.choose k s : ℕ) : ENNReal))
+    (h_indep :
+      ∀ i A,
+        μ {ω | r ω = i ∧ S ω = A}
+          = μ {ω | r ω = i} * μ {ω | S ω = A})
+    (x : Fin k → α) (q : ℕ) :
+    μ {ω |
+        (Matrix.mulVec G (fun i => if i ∈ S ω then x i else 0) (r ω) = 0)
+        ∧ ¬ ((Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card ≤ q)}
+      ≤ ENNReal.ofReal
+          ((1 - (d : ℝ) / (m : ℝ)) +
+           (1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s) :=
+by
+  set y : Ω → (Fin k → α) := fun ω i => if i ∈ S ω then x i else 0
+  set E : Set Ω := {ω |
+      (Matrix.mulVec G (y ω) (r ω) = 0)
+      ∧ ¬ ((Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card ≤ q)}
+  by_cases hqk : q + 1 ≤ k
+  · by_cases hx_le : (Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card ≤ q
+    · have hμE : μ E = 0 := by simp [E, hx_le]
+      simp [hμE]
+    · have hx_ne : x ≠ 0 := by intro hx0; exact hx_le (by simp [hx0])
+      have hdx_le_m : d ≤ m := by
+        have h_ge := hG x hx_ne
+        have h_le :=
+          Finset.card_filter_le (Finset.univ : Finset (Fin m))
+            (fun i : Fin m => Matrix.mulVec G x i ≠ 0)
+        simpa [Fintype.card_fin] using h_ge.trans h_le
+      set E1 : Set Ω := {ω | Matrix.mulVec G (y ω) (r ω) = 0 ∧ y ω ≠ 0}
+      set E2 : Set Ω := {ω | y ω = 0 ∧ ¬ ((Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card ≤ q)}
+      have hμ_E_le : μ E ≤ μ E1 + μ E2 := by
+        refine (measure_mono ?_).trans (by simpa using measure_union_le E1 E2)
+        intro ω hω; rcases hω with ⟨hz, hnot⟩; by_cases hy : y ω = 0
+        · exact Or.inr ⟨hy, hnot⟩
+        · exact Or.inl ⟨hz, hy⟩
+      have hE2_le : μ E2 ≤ ENNReal.ofReal ((1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s) := by
+        simpa [E2, y, ZkLinalg.mask_eq_zero_iff_forall_mem] using
+          (mask_zero_uniform_subset_bound (μ := μ) (S := S) (s := s)
+            (h_card := h_card) (h_unif_S := h_unif_S) (x := x) (q := q))
+      set As : Finset (Finset (Fin k)) := (Finset.univ : Finset (Fin k)).powersetCard s
+      set yA : Finset (Fin k) → (Fin k → α) := fun A i => if i ∈ A then x i else 0
+      set Zset : Finset (Fin k) → Finset (Fin m) := fun A =>
+        (Finset.univ.filter (fun j : Fin m => Matrix.mulVec G (yA A) j = 0))
+      set AsNZ : Finset (Finset (Fin k)) := As.filter (fun A => yA A ≠ 0)
+      have E1_subset :
+          {ω | Matrix.mulVec G (y ω) (r ω) = 0 ∧ y ω ≠ 0}
+            ⊆ ⋃ A ∈ AsNZ, {ω | S ω = A ∧ r ω ∈ Zset A} := by
+        intro ω hω
+        have hA_mem_As : S ω ∈ As := by
+          refine (Finset.mem_powersetCard.2 ?_)
+          exact ⟨by intro i hi; simp, h_card ω⟩
+        have hy_eq : y ω = yA (S ω) := by funext i; simp [y, yA]
+        have hA_mem_AsNZ : S ω ∈ AsNZ := by
+          refine Finset.mem_filter.mpr ?_;
+          exact ⟨hA_mem_As, by simpa [hy_eq] using hω.2⟩
+        have hrZ : r ω ∈ Zset (S ω) := by
+          have : Matrix.mulVec G (yA (S ω)) (r ω) = 0 := by simpa [hy_eq] using hω.1
+          simpa [Zset] using this
+        refine Set.mem_iUnion.2 ?_;
+        refine ⟨S ω, ?_⟩; refine Set.mem_iUnion.2 ?_;
+        exact ⟨hA_mem_AsNZ, by simpa⟩
+      have hμ_union : μ {ω | Matrix.mulVec G (y ω) (r ω) = 0 ∧ y ω ≠ 0}
+          ≤ ∑ A ∈ AsNZ, μ {ω | S ω = A ∧ r ω ∈ Zset A} :=
+        (measure_mono E1_subset).trans (by
+          simpa using MeasureTheory.measure_biUnion_finset_le (μ := μ) AsNZ (fun A => {ω | S ω = A ∧ r ω ∈ Zset A}))
+      have h_indep' : ∀ (A : Finset (Fin k)) (j : Fin m),
+          μ {ω | S ω = A ∧ r ω = j}
+            = μ {ω | S ω = A} * μ {ω | r ω = j} := by
+        intro A j; simpa [and_comm, mul_comm] using h_indep j A
+      have h_indep_bound : ∀ {A : Finset (Fin k)}, A ∈ AsNZ →
+          μ {ω | S ω = A ∧ r ω ∈ Zset A}
+            ≤ μ {ω | S ω = A} * ∑ j ∈ Zset A, μ {ω | r ω = j} := by
+        intro A hA; simpa using
+          (ZkLinalg.measure_inter_preimage_finset_le_mul_sum (μ := μ)
+            (r := S) (r' := r) (h_indep := h_indep') (i := A) (A := Zset A))
+      have hsum_r_const : ∀ A : Finset (Fin k),
+          (∑ j ∈ Zset A, μ {ω | r ω = j})
+            = (Zset A).card • ((1 : ENNReal) / (m : ENNReal)) := by
+        intro A; simp [Finset.sum_congr rfl fun j hj => h_unif_r j, Finset.sum_const]
+      have hZ_le : ∀ {A : Finset (Fin k)}, A ∈ AsNZ → (Zset A).card ≤ m - d := by
+        intro A hA
+        have hy_ne : yA A ≠ 0 := (Finset.mem_filter.mp hA).2
+        simpa [Zset] using
+          (ZkLinalg.zero_positions_card_le_of_distance (G' := G) (hG' := hG)
+            (y := yA A) (hy := hy_ne))
+      have hμ_union_le : μ {ω | Matrix.mulVec G (y ω) (r ω) = 0 ∧ y ω ≠ 0}
+          ≤ ∑ A ∈ AsNZ,
+              μ {ω | S ω = A} *
+                (((m - d : ℕ) : ENNReal) * ((1 : ENNReal) / (m : ENNReal))) := by
+        refine hμ_union.trans ?_
+        refine Finset.sum_le_sum (by
+          intro A hA
+          have h1 := h_indep_bound (A := A) hA
+          have hsum := hsum_r_const A
+          have hsum_le :
+              (∑ j ∈ Zset A, μ {ω | r ω = j})
+                ≤ ((m - d : ℕ) : ENNReal) *
+                    ((1 : ENNReal) / (m : ENNReal)) := by
+            have : ((Zset A).card : ENNReal) ≤ ((m - d : ℕ) : ENNReal) := by exact_mod_cast hZ_le hA
+            simpa [hsum, nsmul_eq_mul] using mul_le_mul' this le_rfl
+          exact (le_trans h1 (mul_le_mul_left' hsum_le _)))
+      let C : ENNReal := (((m - d : ℕ) : ENNReal) * ((1 : ENNReal) / (m : ENNReal)))
+      have h1 : μ E1 ≤ ∑ A ∈ AsNZ, μ {ω | S ω = A} * C := by simpa [E1, C] using hμ_union_le
+      have h2 : (∑ A ∈ AsNZ, μ {ω | S ω = A} * C) = C * (∑ A ∈ AsNZ, μ {ω | S ω = A}) := by
+        simpa [C, mul_comm, mul_left_comm, mul_assoc] using
+          (Finset.sum_mul (s := AsNZ) (f := fun A : Finset (Fin k) => μ {ω | S ω = A}) (a := C)).symm
+      have hsum_AsNZ_le_As :
+          (∑ A ∈ AsNZ, μ {ω | S ω = A}) ≤ (∑ A ∈ As, μ {ω | S ω = A}) := by
+        have hrepr :
+            (∑ A ∈ AsNZ, μ {ω | S ω = A})
+              = ∑ A ∈ As, (if yA A = 0 then 0 else μ {ω | S ω = A}) := by
+          simp [AsNZ, Finset.sum_filter, ite_not]
+        have hpoint : ∀ A ∈ As,
+            (if yA A = 0 then 0 else μ {ω | S ω = A}) ≤ μ {ω | S ω = A} := by
+          intro A hA; by_cases h : yA A = 0 <;> simp [h]
+        simpa [hrepr] using
+          (Finset.sum_le_sum fun A hA => hpoint A hA)
+      have h_unif_const : ∀ A ∈ As,
+          μ {ω | S ω = A} = (1 : ENNReal) / ((Nat.choose k s : ℕ) : ENNReal) := by
+        intro A hA; simpa using h_unif_S A ((Finset.mem_powersetCard.1 hA).2)
+      have hsum_As :
+          (∑ A ∈ As, μ {ω | S ω = A})
+            = As.card • ((1 : ENNReal) / ((Nat.choose k s : ℕ) : ENNReal)) := by
+        simp [Finset.sum_congr rfl fun A hA => h_unif_const A hA, Finset.sum_const]
+      have hAs_card : As.card = Nat.choose k s := by
+        simp [As, Finset.card_univ, Fintype.card_fin]
+      have hsum_As_le_one : (∑ A ∈ As, μ {ω | S ω = A}) ≤ 1 := by
+        have hrepr :
+            (∑ A ∈ As, μ {ω | S ω = A}) = ((Nat.choose k s : ENNReal) * ((Nat.choose k s : ENNReal))⁻¹) := by
+          simp [hsum_As, hAs_card, nsmul_eq_mul, div_eq_mul_inv]
+        by_cases hc0 : Nat.choose k s = 0
+        · have : (∑ A ∈ As, μ {ω | S ω = A}) = 0 := by simp [hrepr, hc0]
+          simp [this]
+        · have hpos : ((Nat.choose k s : ℕ) : ENNReal) ≠ 0 := by
+            exact_mod_cast (ne_of_gt (Nat.pos_of_ne_zero hc0))
+          have hTop : ((Nat.choose k s : ℕ) : ENNReal) ≠ (⊤ : ENNReal) := by simp
+          have hmul : ((Nat.choose k s : ENNReal) * ((Nat.choose k s : ENNReal))⁻¹) = 1 :=
+            ENNReal.mul_inv_cancel hpos hTop
+          simp [hrepr, hmul]
+      have hsum_AsNZ_le_one : (∑ A ∈ AsNZ, μ {ω | S ω = A}) ≤ 1 := hsum_AsNZ_le_As.trans hsum_As_le_one
+      have hE1_div : μ E1 ≤ (((m - d : ℕ) : ENNReal) / (m : ENNReal)) := by
+        have h3 : μ E1 ≤ C * (∑ A ∈ AsNZ, μ {ω | S ω = A}) := by simpa [h2] using h1
+        have h4 : μ E1 ≤ C * 1 := h3.trans (mul_le_mul_left' hsum_AsNZ_le_one _)
+        simpa [E1, C, div_eq_mul_inv, one_mul] using h4
+      have hE1_le : μ E1 ≤ ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ)) := by
+        by_cases hm0 : m = 0
+        · have hof : ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ)) = 1 := by
+            have : (m : ℝ) = 0 := by simpa using congrArg (fun n : ℕ => (n : ℝ)) hm0
+            simp [this]
+          have hμ_le_one : μ E1 ≤ 1 := by
+            have : E1 ⊆ (Set.univ : Set Ω) := by intro ω _; trivial
+            simpa [E1] using (measure_mono this : μ E1 ≤ μ (Set.univ : Set Ω))
+          exact hμ_le_one.trans (by simp [hof])
+        · have hm_pos : 0 < (m : ℝ) := by exact_mod_cast Nat.pos_of_ne_zero hm0
+          have hm_ne : (m : ℝ) ≠ 0 := ne_of_gt hm_pos
+          have h_cast_add : (((m - d : ℕ) : ℝ) + (d : ℝ)) = (m : ℝ) := by
+            simpa [Nat.cast_add] using congrArg (fun t : ℕ => (t : ℝ)) (Nat.sub_add_cancel hdx_le_m)
+          have h_cast_sub : ((m - d : ℕ) : ℝ) = (m : ℝ) - (d : ℝ) :=
+            (eq_sub_iff_add_eq).2 (by simpa [add_comm] using h_cast_add)
+          have h_ofReal_eq_div :
+              ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ))
+                = ((m - d : ℕ) : ENNReal) / (m : ENNReal) := by
+            have h1 : ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ))
+                = ENNReal.ofReal (((m - d : ℕ) : ℝ) / (m : ℝ)) := by
+              simp [one_sub_div (K := ℝ) (a := (d : ℝ)) (b := (m : ℝ)) hm_ne, h_cast_sub]
+            have h2 : ENNReal.ofReal (((m - d : ℕ) : ℝ) / (m : ℝ))
+                = ENNReal.ofReal ((m - d : ℕ) : ℝ) / (m : ENNReal) := by
+              simpa using ENNReal.ofReal_div_of_pos (x := ((m - d : ℕ) : ℝ)) (y := (m : ℝ)) hm_pos
+            have h3 : ENNReal.ofReal ((m - d : ℕ) : ℝ) = ((m - d : ℕ) : ENNReal) := by simp
+            simp [h1, h2, h3]
+          exact hE1_div.trans (by simp [h_ofReal_eq_div])
+      have hfinal' :
+          μ E ≤ ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ)) + ENNReal.ofReal ((1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s) :=
+        hμ_E_le.trans (add_le_add hE1_le hE2_le)
+      have hnonneg1 : 0 ≤ 1 - (d : ℝ) / (m : ℝ) := by
+        by_cases hm0 : m = 0
+        · simp [hm0]
+        · have : (d : ℝ) ≤ (m : ℝ) := by exact_mod_cast hdx_le_m
+          have hm0' : 0 ≤ (m : ℝ) := by exact_mod_cast (Nat.zero_le m)
+          have : (d : ℝ) / (m : ℝ) ≤ 1 := by
+            simpa using (div_le_one_of_le₀ (a := (d : ℝ)) (b := (m : ℝ)) this hm0')
+          exact sub_nonneg.mpr this
+      have hnonneg2 : 0 ≤ (1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s := by
+        have : (q + 1 : ℝ) ≤ (k : ℝ) := by exact_mod_cast hqk
+        have hk0 : 0 ≤ (k : ℝ) := by exact_mod_cast (Nat.zero_le k)
+        have : (q + 1 : ℝ) / (k : ℝ) ≤ 1 := by
+          simpa using (div_le_one_of_le₀ (a := (q + 1 : ℝ)) (b := (k : ℝ)) this hk0)
+        exact pow_nonneg (sub_nonneg.mpr this) _
+      have hsum_ofReal :
+          ENNReal.ofReal (1 - (d : ℝ) / (m : ℝ)) + ENNReal.ofReal ((1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s)
+            = ENNReal.ofReal ((1 - (d : ℝ) / (m : ℝ)) + (1 - ((q + 1 : ℝ) / (k : ℝ))) ^ s) := by
+        simp [ENNReal.ofReal_add, hnonneg1, hnonneg2]
+      simpa [E, hsum_ofReal] using hfinal'
+  · have hk_le_q : k ≤ q := Nat.le_of_lt_succ (by simpa [Nat.succ_eq_add_one] using hqk)
+    have h_support_le_q :
+        (Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card ≤ q :=
+      (le_trans
+        (by
+          simpa [Fintype.card_fin] using
+            (Finset.card_le_univ (Finset.univ.filter (fun i : Fin k => x i ≠ 0))))
+        hk_le_q)
+    have hμE : μ E = 0 := by simp [E, h_support_le_q]
+    simp [hμE]
 
 lemma kronecker_product_distance
   {α : Type*} [CommSemiring α] [DecidableEq α] [Zero α]
@@ -1315,18 +1318,6 @@ by
   · exact subspace_distance_check_n2_main_reduction V G hG X q h_q μ r h_unif h_close
 
 
-/-- Basis Alignment for Diagonal Operators: if a two-column matrix `X = [x₁ x₂]` is `q`-close to a subspace `V'`, then for any diagonal weights `D : Fin k → α`, any linear combination `a · x₁ + D ⊙ x₂` is within Hamming distance ≤ `q` of `V'`. -/
-lemma basis_alignment_diagonal
-  {α : Type*} [Semiring α] [DecidableEq α] [Zero α]
-  {k : ℕ}
-  (V' : Submodule α (Fin k → α)) (q : ℕ)
-  (X : Matrix (Fin k) (Fin 2) α)
-  (hclose : qCloseToSubspace V' q X) :
-  ∀ a b : α, ∃ v ∈ V',
-    (Finset.univ.filter
-      (fun i : Fin k => (a * X i 0 + b * X i 1) ≠ v i)).card ≤ q :=
-by intro a b; obtain ⟨Y, hcols, hcard⟩ := hclose; exact ⟨_, V'.add_mem (V'.smul_mem a (hcols 0)) (V'.smul_mem b (hcols 1)), (Finset.card_le_card fun i hi => by simp at hi ⊢; exact if h : X i 0 = Y i 0 then ⟨1, hi ∘ (by simp [h, ·])⟩ else ⟨0, h⟩).trans hcard⟩
-
 /-- FRI Basis Alignment: with `T1 = [I; I]` and `T2 = [D; −D]` (for a diagonal `D : Fin m → α`), if `X = [x₁ x₂] : Matrix (Fin m) (Fin 2) α` is `q`-close to `V'`, then `T1 x₁ + T2 x₂` is within Hamming distance ≤ `2q` of the larger space `V` (as a vector in `α^{2m}`). -/
 lemma fri_basis_alignment
   {α : Type*} [Ring α] [DecidableEq α]
@@ -1354,7 +1345,10 @@ by
   set v : Fin (m + m) → α := fun i => Fin.addCases y0 y0 i + Fin.addCases (fun j => D j * y1 j) (fun j => - D j * y1 j) i
   set Top := fun j => X j 0 + D j * X j 1; set Bot := fun j => X j 0 - D j * X j 1
   have hsubset : (Finset.univ.filter fun i => Fin.addCases Top Bot i ≠ v i) ⊆ S.image (Fin.castAdd m) ∪ S.image (Fin.addNat · m) := fun i hi => by
-    have hagree : ∀ j ∉ S, ∀ t, X j t = Y j t := fun j hj t => by simp_all [S]
+    have hagree : ∀ j ∉ S, ∀ t, X j t = Y j t := fun j hj t => by
+      by_contra h
+      simp only [S, Finset.mem_filter, Finset.mem_univ, true_and, not_exists] at hj
+      exact hj t h
     obtain ⟨-, hneq⟩ := Finset.mem_filter.1 hi
     by_cases hlt : (i : ℕ) < m
     · set j := Fin.castLT i hlt

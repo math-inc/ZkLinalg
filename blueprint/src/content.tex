@@ -6,7 +6,7 @@ For a real number $p \in [0, 1]$, we write $P(r) \implies_p Q(r')$ if and only i
 \[ \prob{P(r) \land \neg Q(r')} \leq p \]
 \end{definition}
 
-\begin{lemma}[Chaining]\label{lem:chaining_probabilistic}\leanok
+\begin{lemma}[Chaining]\label{lem:chaining_probabilistic}\leanok \lean{ZkLinalg.chaining_probabilistic}
 \uses{def:probabilistic_implication}
 Let $\Omega$ be a sample space. Let $r, r', r''$ be random variables on $\Omega$. Let $P, Q, T$ be predicates on the codomains of $r, r', r''$ respectively.
 For any real numbers $p, p' \in [0, 1]$, if:
@@ -17,11 +17,11 @@ For any real numbers $p, p' \in [0, 1]$, if:
 then:
 \[ P(r) \implies_{p+p'} T(r'') \]
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 Union bound on disjunction $(P(r) \land \neg Q(r')) \lor (Q(r') \land \neg T(r''))$ covering $(P(r) \land \neg T(r''))$.
 \end{proof}
 
-\begin{lemma}[Contrapositive]\label{lem:contrapositive_probabilistic}\leanok
+\begin{lemma}[Contrapositive]\label{lem:contrapositive_probabilistic}
 \uses{def:probabilistic_implication}
 Let $r$ be a random variable. Let $P, Q$ be predicates. For any $p \in [0, 1]$, if $P(r) \implies_p Q(r)$, then $\neg Q(r) \implies_p \neg P(r)$.
 \end{lemma}
@@ -29,7 +29,7 @@ Let $r$ be a random variable. Let $P, Q$ be predicates. For any $p \in [0, 1]$, 
 Identical event probabilities by definition.
 \end{proof}
 
-\begin{lemma}[Conjunction]\label{lem:conjunction_probabilistic}\leanok
+\begin{lemma}[Conjunction]\label{lem:conjunction_probabilistic}\leanok \lean{ZkLinalg.conjunction_probabilistic}
 \uses{def:probabilistic_implication}
 Let $r, r'$ be independent random variables. Let $P$ be a predicate on $r$, $T$ be a predicate on $r'$, and $Q$ be a deterministic statement (a constant predicate). Assume the events $\{P(r)\}$ and $\{T(r')\}$ are measurable.
 For any $p, p' \in [0, 1]$, if:
@@ -40,7 +40,7 @@ For any $p, p' \in [0, 1]$, if:
 then:
 \[ P(r) \land T(r') \implies_{pp'} Q \]
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 Multiplication of independent failure probabilities.
 \end{proof}
 
@@ -60,14 +60,14 @@ Let $G \in \mathbb{F}^{m \times n}$ be a matrix. Its distance is
 where $\|\cdot\|_0$ denotes the Hamming weight. A linear code has distance $d$ if $d(G) \geq d$.
 \end{definition}
 
-\begin{lemma}[Reed-Solomon Distance]\label{lem:reed_solomon_distance}\leanok
+\begin{lemma}[Reed-Solomon Distance]\label{lem:reed_solomon_distance}\leanok \lean{ZkLinalg.reed_solomon_distance}
 \uses{def:reed_solomon_matrix,def:code_distance}
 For any integers $m \geq n \geq 1$ and any field $\mathbb{F}$ with $|\mathbb{F}| \geq m$, let $G$ be the Reed-Solomon matrix defined in Definition~\ref{def:reed_solomon_matrix}.
 Then for all nonzero vectors $x \in \mathbb{F}^n \setminus \{0\}$:
 \[ \|Gx\|_0 \geq m - n + 1 \]
 where $\|\cdot\|_0$ denotes the Hamming weight.
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 A nonzero polynomial of degree $\leq n-1$ has at most $n-1$ roots; thus at least $m-(n-1)$ of the evaluations are nonzero.
 \end{proof}
 
@@ -76,18 +76,18 @@ Let $\mathbb{F}$ be a finite field and $n$ be a positive integer. Let $m = |\mat
 The Hadamard matrix $G \in \mathbb{F}^{m \times n}$ is defined such that the $i$-th row of $G$ is $v_i^T$.
 \end{definition}
 
-\begin{lemma}[Hadamard Distance]\label{lem:hadamard_distance}\leanok
+\begin{lemma}[Hadamard Distance]\label{lem:hadamard_distance}\leanok \lean{ZkLinalg.hadamard_distance}
 \uses{def:hadamard_matrix,def:code_distance}
 Let $G$ be the Hadamard matrix from Definition~\ref{def:hadamard_matrix}. For all nonzero $x \in \mathbb{F}^n \setminus \{0\}$:
 \[ \|Gx\|_0 \geq |\mathbb{F}|^n - |\mathbb{F}|^{n-1} \]
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 For any nonzero message $x$, the equation $y^T x = 0$ forces one coordinate of $y$; at most $|\mathbb{F}|^{n-1}$ solutions exist.
 \end{proof}
 
 \section*{Core Reduction Lemmas (§3.1)}
 
-\begin{lemma}[Zero Check]\label{lem:zero_check}\leanok
+\begin{lemma}[Zero Check]\label{lem:zero_check}\leanok \lean{ZkLinalg.zero_check}
 \uses{def:code_distance}
 Let $\mathbb{F}$ be a finite field. Let $G \in \mathbb{F}^{m \times n}$ be a matrix such that for all $z \in \mathbb{F}^n \setminus \{0\}$, $\|Gz\|_0 \geq d$.
 Let $x \in \mathbb{F}^n$ be an arbitrary vector. Let $r$ be a random variable uniformly distributed on $\{1, \ldots, m\}$.
@@ -95,12 +95,12 @@ Then:
 \[ (Gx)_r = 0 \implies_{p} x = 0 \]
 with $p = 1 - d/m$.
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 If $x \neq 0$, $Gx$ has at least $d$ nonzero entries; a random coordinate hits one with probability $d/m$.
 \end{proof}
 
 \begin{lemma}[Matrix Zero Check]\label{lem:matrix_zero_check}\leanok
-\uses{lem:zero_check}
+\uses{lem:zero_check} \lean{ZkLinalg.matrix_zero_check}
 Let $G \in \mathbb{F}^{m \times n}$ be a matrix with distance $d$.
 Let $X \in \mathbb{F}^{k \times n}$ be an arbitrary matrix. Let $\tilde{g}_r$ denote the $r$-th row of $G$ transposed (a column vector).
 Let $r$ be uniform on $\{1, \ldots, m\}$.
@@ -108,11 +108,11 @@ Then:
 \[ X\tilde{g}_r = 0 \implies_{p} X = 0 \]
 with $p = 1 - d/m$.
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 Interpret columns as rows, apply Lemma~\ref{lem:zero_check} to each row $\tilde{x}_j^T$.
 \end{proof}
 
-\begin{lemma}[Reduced Matrix Zero Check]\label{lem:reduced_matrix_zero_check}\leanok
+\begin{lemma}[Reduced Matrix Zero Check]\label{lem:reduced_matrix_zero_check}\leanok \lean{ZkLinalg.reduced_matrix_zero_check}
 \uses{lem:zero_check,lem:chaining_probabilistic}
 Let $G \in \mathbb{F}^{m \times n}$ be a code with distance $d$. Let $G' \in \mathbb{F}^{m' \times k}$ be a code with distance $d'$.
 Let $X \in \mathbb{F}^{k \times n}$.
@@ -122,39 +122,26 @@ Then:
 \[ \tilde{g}_{r'}'^{\!T} X \tilde{g}_r = 0 \implies_{p_{\text{total}}} X = 0 \]
 where $p_{\text{total}} = (1 - d/m) + (1 - d'/m')$.
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 Chain two zero checks: inner randomness reduces $X$ to vector $\tilde{g}_{r'}'^{\!T} X$, outer reduces to a scalar.
 \end{proof}
 
-\begin{lemma}[Vector Subspace Check]\label{lem:vector_subspace_check}
-\uses{lem:matrix_zero_check}
-Let $V \subseteq \mathbb{F}^k$ be a linear subspace. Let $C \in \mathbb{F}^{s \times k}$ be a parity-check matrix for $V$ (i.e., $V = \ker C$).
-Let $G \in \mathbb{F}^{m \times n}$ be a code with distance $d$.
-Let $X \in \mathbb{F}^{k \times n}$. Let $r$ be uniform on $\{1, \ldots, m\}$.
-Then:
-\[ X\tilde{g}_r \in V \implies_{p} \forall i \in \{1, \ldots, n\}, X_i \in V \]
-with $p = 1 - d/m$, where $X_i$ denotes the $i$-th column of $X$.
-\end{lemma}
-\begin{proof}
-Convert to a zero check: $C(X\tilde{g}_r) = 0$. Apply Lemma~\ref{lem:matrix_zero_check} to $CX$.
-\end{proof}
-
-\begin{lemma}[Polynomial Zero Check Corollary]\label{lem:polynomial_zero_check}\leanok
+\begin{lemma}[Polynomial Zero Check Corollary]\label{lem:polynomial_zero_check}\leanok \lean{ZkLinalg.polynomial_zero_check}
 \uses{lem:zero_check,lem:reed_solomon_distance}
 Let $f \in \mathbb{F}[x]$ be a polynomial of degree at most $n-1$. Let $r$ be a random variable uniformly distributed on $\mathbb{F}$.
 Then:
 \[ f(r) = 0 \implies_{p} f \equiv 0 \]
 with $p = (n-1)/|\mathbb{F}|$.
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 Specialize Lemma~\ref{lem:zero_check} to the Reed-Solomon matrix with $m = |\mathbb{F}|$ and $d = m-n+1$.
 \end{proof}
 
-\begin{lemma}[Kronecker Product Distance]\label{lem:kronecker_product_distance}\leanok \lean{ZkLinalg.kronecker_product_distance}
+\begin{lemma}[Kronecker Product Distance]\label{lem:kronecker_product_distance} \leanok \lean{ZkLinalg.kronecker_product_distance}
 Let $G \in \mathbb{F}^{m \times n}$ have distance $d$ and $G' \in \mathbb{F}^{m' \times k}$ have distance $d'$.
 Then the Kronecker product code $G' \otimes G$ has distance at least $dd'$.
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 Any nonzero tensor $z$ factors as $z = y \otimes x$ with $y \neq 0$, $x \neq 0$. The support of $(G' \otimes G)z$ contains the Cartesian product of the supports of $G'y$ and $Gx$, yielding at least $dd'$ nonzero entries.
 \end{proof}
 
@@ -170,17 +157,17 @@ Apply Lemma~\ref{lem:kronecker_product_distance}; compare with Lemma~\ref{lem:re
 
 \section*{Sparsity and Distance Checks (§3.2)}
 
-\begin{lemma}[Sparsity Check]\label{lem:sparsity_check}\leanok
+\begin{lemma}[Sparsity Check]\label{lem:sparsity_check}\leanok \lean{ZkLinalg.sparsity_check}
 Let $x \in \mathbb{F}^k$. Let $q \in \{0, \ldots, k\}$. Let $r$ be uniform on $\{1, \ldots, k\}$.
 Then:
 \[ x_r = 0 \implies_{p} \|x\|_0 \leq q \]
 with $p = 1 - \frac{q+1}{k}$.
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 Direct counting argument.
 \end{proof}
 
-\begin{lemma}[Matrix Sparsity Check]\label{lem:matrix_sparsity_check}\leanok
+\begin{lemma}[Matrix Sparsity Check]\label{lem:matrix_sparsity_check}\leanok \lean{ZkLinalg.matrix_sparsity_check}
 \uses{lem:zero_check}
 Let $X \in \mathbb{F}^{k \times n}$. Let $G \in \mathbb{F}^{m \times n}$ with distance $d$. Let $q$ be an integer.
 Let $r$ be uniform on $\{1, \ldots, m\}$.
@@ -188,7 +175,7 @@ Then:
 \[ \left\|\sum_{i=1}^n G_{ri} x_i\right\|_0 \leq q \implies_{p} \|X\|_{\text{row-0}} \leq q \]
 where $\|X\|_{\text{row-0}}$ is the number of nonzero rows of $X$, and $p = (q+1)(1 - d/m)$.
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 Select $q+1$ nonzero rows to form $\hat{X}$. For each row, apply the zero check; use a union bound.
 \end{proof}
 
@@ -217,7 +204,7 @@ failure probability at most
   p_{\mathrm{total}} \le \left(1 - \frac{d}{m}\right) + \left(1 - \frac{q+1}{k}\right)^{|S|}.
 \]
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 Chain the zero check on the encoded sample with the sparsity check on the original vector.
 \end{proof}
 
@@ -363,7 +350,7 @@ this contradicts the distance property, since it gives a nonzero codeword with t
 
 \section*{FRI Protocol Construction (§4.2)}
 
-\begin{definition}[FRI Subspace Structure]\label{def:fri_subspace_structure}
+\begin{definition}[FRI Subspace Structure]\label{def:fri_subspace_structure} \leanok
 Let $n$ be a power of $2$. Let $\mathbb{F}$ be a field.
 Let $V \subseteq \mathbb{F}^n$ be the space of evaluations of polynomials of degree $\leq s$ at points $\{\alpha_1,\ldots,\alpha_n\}$.
 Let $V' \subseteq \mathbb{F}^{n/2}$ be evaluations of degree $\leq s$ polynomials with only even-degree terms at squared points $\{\alpha_1^2,\ldots,\alpha_{n/2}^2\}$.
@@ -432,7 +419,7 @@ With distance budget $q/3^i$, the failure probability $p_i$ then satisfies:
 \[ p_i \leq \left(\frac{q}{3^i} + 1\right)\left(1 - \frac{d}{m}\right) + \left(1 - \frac{q/3^i + 1}{n/2^i}\right)^{|S_i|} \]
 where $|S_i|$ is the number of queries in round $i$.
 \end{lemma}
-\begin{proof}
+\begin{proof} \leanok
 Direct from Lemma~\ref{lem:fri_reduction_step} with substituted parameters.
 \end{proof}
 
