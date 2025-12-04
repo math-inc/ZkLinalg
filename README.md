@@ -2,7 +2,7 @@
 
 An AI-assisted Lean 4 formalization of the Fast Reed–Solomon Interactive Oracle Proof (FRI) protocol, a core component of modern transparent, STARK-style zero-knowledge proofs.
 
-This project starts from elementary linear algebra (matrix multiplication, code distance, random sampling) and builds all the way up to a fully machine-checked security proof for FRI with concrete soundness bounds.
+This project starts from elementary linear algebra (matrix multiplication, code distance, random sampling) and builds all the way up to a fully machine-checked security proof for FRI with concrete soundness bounds, following the framework of Evans–Angeris ["Succinct Proofs and Linear Algebra"](https://eprint.iacr.org/2023/1478).
 
 All the Lean statements and proofs were produced by **Gauss**, Math Inc.'s autoformalization agent, guided by a LaTeX blueprint.
 
@@ -22,7 +22,7 @@ All the Lean statements and proofs were produced by **Gauss**, Math Inc.'s autof
 
 ## Links
 
-- **Project page:** <https://zk-splash.vercel.app/>
+- **Project page:** <https://app.math.inc/zk-linalg>
 - **Blueprint (web):** <https://math-inc.github.io/ZkLinalg/blueprint>
 - **Blueprint (PDF):** <https://math-inc.github.io/ZkLinalg/blueprint.pdf>
 - **Documentation:** <https://math-inc.github.io/ZkLinalg/docs/>
@@ -50,8 +50,6 @@ You will need:
 - A LaTeX installation (e.g. TeX Live) for the PDF
 
 ### Lean development
-
-Fetch cached dependencies and build the Lean project:
 
 ```bash
 lake exe cache get && lake build
@@ -84,3 +82,10 @@ infrastructure easier to audit, extend, and trust.
 
 For questions or collaborations, please reach out via
 <https://www.math.inc/>.
+
+---
+
+## References
+
+- Alex Evans and Guillermo Angeris, *Succinct Proofs and Linear Algebra*,
+  Cryptology ePrint Archive, Paper 2023/1478. <https://eprint.iacr.org/2023/1478>

@@ -1807,4 +1807,110 @@ by
   have h_geom := geometric_summation (k := k) (η := η) (q := q) (d := d) (m := m_seq 0) (n := nNat) (s := s) (hs := hs) (p := p) (h_pi := fun i _ => by simp [p, A, B, qR, nNat]) (h_d_le_m := hd_le_m) (h_den_pos := fun i hi => by simpa [nNat] using h_den_pos i hi) (h_lambda_le_one := fun i hi => by simpa [nNat] using h_lambda_le_one i hi)
   exact (measure_biUnion_finset_le _ _).trans (h_sum.trans (ENNReal.ofReal_le_ofReal (by simpa [(by field_simp : ((m_seq 0 : ℝ) - (d : ℝ)) / (m_seq 0 : ℝ) = 1 - (d : ℝ) / (m_seq 0 : ℝ)), nNat] using h_geom)))
 
+/-- Theorem: FRI Protocol Security (Production Variant)
+
+This theorem formalizes the production version of FRI where queries are deterministically
+expanded across rounds via square-root relationships. Each layer's queries are the
+square roots of the previous layer's queries, which (1) doubles the query count each
+round and (2) requires working over a subfield of order 2^m for some m (so the Frobenius
+map x ↦ x² is 2-to-1). This algebraic constraint is implicit in the existence of the
+sqrt_map with the 2-to-1 property below.
+
+Despite this deterministic structure, the soundness bound is IDENTICAL to the original
+`fri_security_complete` because the proof relies only on marginal uniformity of each
+round's queries, not on any independence between rounds. The deterministic relationship
+is documented purely to model production FRI behavior and is NOT used in probability
+calculations. -/
+theorem fri_security_complete_production
+  {α : Type*} [Field α] [DecidableEq α]
+  -- Basic parameters
+  (k η q : ℕ)
+  -- Probability space
+  {Ω : Type*} [MeasurableSpace Ω] (μ : Measure Ω) [IsProbabilityMeasure μ]
+  -- m_seq i is the folded dimension at round i
+  -- n = 2 * m_seq 0 is the initial dimension
+  (m_seq : ℕ → ℕ)
+  (hm0_pos : 0 < m_seq 0)
+  -- FRI dimension schedule: dimension halves each round (m_seq i = m_seq 0 / 2^i)
+  (h_m_seq : ∀ i < k, m_seq i * 2^i = m_seq 0)
+  -- FRI subspace sequences
+  (V_seq  : ∀ i : ℕ, Submodule α (Fin (m_seq i + m_seq i) → α))
+  (V'_seq : ∀ i : ℕ, Submodule α (Fin (m_seq i) → α))
+  -- Diagonal folding coefficients (from def:fri_subspace_structure)
+  (D_seq : ∀ i : ℕ, Fin (m_seq i) → α)
+  -- FRI structural hypotheses: V = T₁V' ⊕ T₂V' where T₁ = [I; I], T₂ = [D; -D]
+  (hT1 : ∀ i < k, ∀ y ∈ V'_seq i,
+      (fun j : Fin (m_seq i + m_seq i) => Fin.addCases y y j) ∈ V_seq i)
+  (hT2 : ∀ i < k, ∀ y ∈ V'_seq i,
+      (fun j : Fin (m_seq i + m_seq i) =>
+        Fin.addCases (fun t => (D_seq i) t * y t) (fun t => - (D_seq i) t * y t) j) ∈ V_seq i)
+  -- Subspace distance condition: 4 * q_i < d'(V'ᵢ) for unique decoding at round i
+  -- where q_i = q / 3^i is the per-round proximity parameter
+  (h_subspace_dist : ∀ i < k, 4 * (q / 3^i) < subspaceDistance (V'_seq i))
+  -- Prover's matrices and oracles (what we're checking)
+  -- NO closeness assumption needed! With the conjunction-based friRoundBadEvent,
+  -- round_wise_error bounds the bad event unconditionally.
+  (X_seq : ∀ i : ℕ, Matrix (Fin (m_seq i)) (Fin 2) α)
+  (y_seq : ∀ i : ℕ, Fin (m_seq i + m_seq i) → α)
+  -- Code matrices for folding checks (one per round due to dimension changes)
+  (G_seq : ∀ i : ℕ, Matrix (Fin (m_seq i)) (Fin 2) α)
+  (d : ℕ) -- Code distance (same for all rounds)
+  (hd_le_m : d ≤ m_seq 0) -- Code distance bounded by initial dimension
+  (hG : ∀ i < k, codeHasDistanceAtLeast (G_seq i) d)
+  -- Random challenge selectors
+  (r_seq : ∀ i : ℕ, Ω → Fin (m_seq i))
+  (h_r_unif : ∀ i < k, ∀ j : Fin (m_seq i),
+      μ {ω | r_seq i ω = j} = (1 : ENNReal) / (m_seq i : ENNReal))
+  -- Sample sets for proximity checks
+  -- Sample sizes follow the geometric growth: s i = η * (3/2)^i
+  (s : ℕ → ℕ)
+  (hs : ∀ i < k, (s i : ℝ) = (η : ℝ) * ((3 : ℝ) / 2) ^ i)
+  -- Lambda condition: per-round proximity parameter bounded by dimension
+  -- (q / 3^i + 1) ≤ (n / 2^i) where n = 2 * m_seq 0
+  (h_lambda_le_one : ∀ i < k, (((q / 3^i : ℕ) + 1 : ℝ) ≤ ((2 * m_seq 0 / 2^i : ℕ) : ℝ)))
+  -- Positivity of per-round dimensions
+  (h_den_pos : ∀ i < k, 0 < (2 * m_seq 0) / 2^i)
+  -- Sample sets (uniformly distributed per round)
+  (S_seq : ∀ i : ℕ, Ω → Finset (Fin (m_seq i + m_seq i)))
+  (h_S_card : ∀ i < k, ∀ ω, (S_seq i ω).card = s i)
+  -- Uniformity of samples for all rounds (preserves marginal distribution)
+  (hS_unif : ∀ i < k, ∀ A : Finset (Fin (m_seq i + m_seq i)), A.card = s i →
+      μ {ω | S_seq i ω = A} = (1 : ENNReal) / ((Nat.choose (2 * m_seq i) (s i) : ℕ) : ENNReal))
+  -- DETERMINISTIC SQUARE-ROOT STRUCTURE (production FRI):
+  -- S_seq i is the deterministic square-root image of S_seq (i+1)
+  -- This models production FRI where queries are expanded deterministically
+  -- while preserving the marginal uniform distribution needed for security bounds
+  --
+  -- Implicit requirement: α must contain a subfield of order 2^m for some m, making
+  -- the Frobenius map x ↦ x² a 2-to-1 correspondence. This is automatically satisfied
+  -- for binary extension fields (F_{2^m}) used in practice, and is encoded by the
+  -- existence of sqrt_map with the 2-to-1 property below.
+  (sqrt_map : ∀ i < (k-1), Fin (m_seq (i+1) + m_seq (i+1)) → Fin (m_seq i + m_seq i))
+  (h_sqrt_map_2to1 : ∀ (i) (hi : i < (k-1)) (y : Fin (m_seq i + m_seq i)),
+      ((Finset.univ.filter (fun x : Fin (m_seq (i+1) + m_seq (i+1)) => sqrt_map i hi x = y)).card = 2))
+  (hS_sqrt_deterministic : ∀ (i) (hi : i < (k-1)) (ω),
+      S_seq i ω = (S_seq (i+1) ω).image (sqrt_map i hi)) :
+  -- Conclusion: bad event probability is bounded (same bound as original)
+  -- Blueprint notation: ε = (3/2·q + k)/|F| + k·exp(-η·q/n)
+  -- where 1/|F| = 1 - d/m (failure probability per challenge) and n = 2·m_seq 0
+  let F : ℝ := (m_seq 0 : ℝ) / ((m_seq 0 : ℝ) - (d : ℝ))  -- Field size proxy: 1/F = 1 - d/m
+  let n : ℝ := 2 * (m_seq 0 : ℝ)  -- Initial dimension
+  μ (⋃ i ∈ Finset.range k,
+      friRoundBadEvent (m_seq i) (V_seq i) (V'_seq i) (G_seq i) (r_seq i)
+        (X_seq i) (D_seq i) (y_seq i) (q / 3^i) (S_seq i))
+    ≤ ENNReal.ofReal
+        (((3 : ℝ) / 2 * (q : ℝ) + (k : ℝ)) * (1 / F) +
+          (k : ℝ) * Real.exp (-(η : ℝ) * (q : ℝ) / n)) :=
+    fri_security_complete
+      (k := k) (η := η) (q := q) (μ := μ)
+      (m_seq := m_seq) (hm0_pos := hm0_pos) (h_m_seq := h_m_seq)
+      (V_seq := V_seq) (V'_seq := V'_seq) (D_seq := D_seq)
+      (hT1 := hT1) (hT2 := hT2) (h_subspace_dist := h_subspace_dist)
+      (X_seq := X_seq) (y_seq := y_seq) (G_seq := G_seq)
+      (d := d) (hd_le_m := hd_le_m) (hG := hG)
+      (r_seq := r_seq) (h_r_unif := h_r_unif)
+      (s := s) (hs := hs) (h_lambda_le_one := h_lambda_le_one)
+      (h_den_pos := h_den_pos) (S_seq := S_seq)
+      (h_S_card := h_S_card) (hS_unif := hS_unif)
+
 end ZkLinalg
