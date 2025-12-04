@@ -1,0 +1,6 @@
+{
+  // List of extensions that should be recommended for users of this workspace
+  "recommendations": [
+    "leanprover.lean4" // Extension for Lean 4 support
+  ]
+}

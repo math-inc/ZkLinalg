@@ -1,0 +1,435 @@
+name: Gauss
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Command to run (gauss-prove, gauss-statement)"
+        required: true
+        type: choice
+        options:
+          - gauss-prove
+          - gauss-statement
+      params:
+        description: "Optional space-separated params (Lean names or labels)"
+        required: false
+        type: string
+      budget:
+        description: "Optional compute budget to use"
+        required: false
+        type: choice
+        options:
+          - very-low
+          - low
+          - medium
+          - high
+          - heavy
+        default: low
+      base_ref:
+        description: "Base ref/branch to run against (defaults to the repo default branch)"
+        required: false
+        type: string
+      init_cmd:
+        description: "Optional init command to run after cloning the repo"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: gauss-${{ github.event_name }}-${{ github.event_name == 'issue_comment' && github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  handle-command:
+    if: >-
+      (github.event_name == 'issue_comment' &&
+       (startsWith(github.event.comment.body, '@gauss-prove') ||
+        startsWith(github.event.comment.body, '@gauss-statement'))) ||
+      (github.event_name == 'workflow_dispatch')
+    runs-on: [self-hosted, linux, x64, morph]
+    timeout-minutes: 1440 # 24 hours
+    steps:
+      - name: Authorize commenter (issue_comment only)
+        if: github.event_name == 'issue_comment'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSOC="${{ github.event.comment.author_association }}"
+          case "$ASSOC" in
+            OWNER|MEMBER|COLLABORATOR)
+              echo "Authorized: $ASSOC" ;;
+            *)
+              echo "Unauthorized commenter association: $ASSOC" >&2
+              echo "Only repo members/collaborators may invoke this workflow." >&2
+              exit 1 ;;
+          esac
+
+      - name: Determine base ref
+        id: base
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BASE_REF="${{ inputs.base_ref }}"
+          else
+            BASE_REF=""
+          fi
+          if [ -z "$BASE_REF" ]; then
+            BASE_REF="${{ github.event.repository.default_branch }}"
+          fi
+          echo "ref=$BASE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout target (PR) with submodules
+        if: github.event_name == 'issue_comment' && github.event.issue.pull_request != null
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          fetch-depth: 0
+          persist-credentials: true
+          submodules: false
+
+      - name: Checkout target (branch/ref) with submodules
+        if: github.event_name != 'issue_comment' || github.event.issue.pull_request == null
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.base.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+          submodules: false
+
+      - name: Parse command + params
+        id: parse
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            BODY="${{ github.event.comment.body }}"
+            LINE=$(printf '%s' "$BODY" | head -n1)
+            CMD=$(echo "$LINE" | awk '{print $1}')
+            PARAMS=$(echo "$LINE" | cut -d' ' -f2-)
+            CMD_NAME="${CMD#@}"
+            INIT_CMD=""
+            BUDGET=""
+          else
+            # workflow_dispatch
+            CMD_NAME="${{ inputs.command }}"
+            PARAMS="${{ inputs.params }}"
+            CMD="@${CMD_NAME}"
+            INIT_CMD="${{ inputs.init_cmd }}"
+            BUDGET="${{ inputs.budget }}"
+          fi
+          echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
+          echo "cmd_name=$CMD_NAME" >> "$GITHUB_OUTPUT"
+          echo "params=$PARAMS" >> "$GITHUB_OUTPUT"
+          echo "init_cmd=$INIT_CMD" >> "$GITHUB_OUTPUT"
+          echo "budget=$BUDGET" >> "$GITHUB_OUTPUT"
+
+      - name: Check tokens
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.MORPH_GAUSS_TOKEN }}" ]; then
+            echo "Missing MORPH_GAUSS_TOKEN secret." >&2
+            exit 1
+          fi
+          if [ -z "${{ secrets.REPO_PAT_TOKEN }}" ]; then
+            echo "Missing REPO_PAT_TOKEN secret." >&2
+            exit 1
+          fi
+
+      - name: Checkout gauss-sdk (runner copy)
+        uses: actions/checkout@v4
+        with:
+          repository: math-inc/gauss-sdk
+          ref: main
+          path: gauss-sdk
+          fetch-depth: 1
+          token: ${{ secrets.REPO_PAT_TOKEN }}
+
+      - name: Derive repository metadata
+        id: meta
+        shell: bash
+        run: |
+          repo_full="$GITHUB_REPOSITORY"
+          repo_url="https://github.com/$GITHUB_REPOSITORY.git"
+          git_rev="$(git rev-parse HEAD)"
+          git_rev_short="$(git rev-parse --short HEAD)"
+          # include a short hash of the init command (if any) in the project name
+          init_cmd="${{ steps.parse.outputs.init_cmd }}"
+          if [ -n "$init_cmd" ]; then
+            init_hash_full=$(printf '%s' "$init_cmd" | sha256sum | awk '{print $1}')
+            init_hash="${init_hash_full:0:7}"
+          else
+            init_hash="none"
+          fi
+          project_name="${GITHUB_REPOSITORY}@${git_rev_short}+init${init_hash}"
+
+          echo "repo_full=$repo_full" >> "$GITHUB_OUTPUT"
+          echo "repo_url=$repo_url" >> "$GITHUB_OUTPUT"
+          echo "git_rev=$git_rev" >> "$GITHUB_OUTPUT"
+          echo "git_rev_short=$git_rev_short" >> "$GITHUB_OUTPUT"
+          echo "init_hash=$init_hash" >> "$GITHUB_OUTPUT"
+          echo "project_name=$project_name" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          source $HOME/.local/bin/env
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          uv --version
+          uv python install 3.12.11
+
+      - name: Create working branch
+        id: branch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name "gauss-agent"
+          git config user.email "gauss@math.inc"
+          if [ "${{ github.event_name }}" = "issue_comment" ] && [ -n "${{ github.event.issue.number }}" ]; then
+            NUM="pr-${{ github.event.issue.number }}"
+          else
+            NUM="manual"
+          fi
+          BRANCH="chatops/${{ steps.parse.outputs.cmd_name }}-${NUM}-${{ github.run_id }}"
+          git checkout -b "$BRANCH"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Run Gauss
+        id: run_gauss
+        if: steps.parse.outputs.cmd_name == 'gauss-prove' || steps.parse.outputs.cmd_name == 'gauss-statement'
+        shell: bash
+        working-directory: gauss-sdk
+        run: |
+          set -euo pipefail
+          # Import parsed command name into this shell scope
+          CMD_NAME="${{ steps.parse.outputs.cmd_name }}"
+          GAUSS_API_URL="https://gauss.svc.cloud.morph.so"
+          GAUSS_API_KEY="${{ secrets.MORPH_GAUSS_TOKEN }}"
+          PROJECT_NAME="${{ steps.meta.outputs.project_name }}"
+          # Optional: Personal Access Token (or App installation token) for private repo cloning by the Gauss service.
+          # Consumers of this workflow should add a repository secret named REPO_PAT_TOKEN when needed; leave unset for public repos.
+          REPO_PAT_TOKEN="${{ secrets.REPO_PAT_TOKEN }}"
+          GAUSS_BUDGET=""
+          GAUSS_BATCH_SIZE=""
+          # prefer explicit input init_cmd, fallback to repo vars
+          PARSE_INIT_CMD="${{ steps.parse.outputs.init_cmd }}"
+          GAUSS_INIT_CMD="$PARSE_INIT_CMD"
+          # prefer explicit input budget, fallback to repo vars
+          PARSE_BUDGET="${{ steps.parse.outputs.budget }}"
+          if [ -n "${PARSE_BUDGET}" ]; then GAUSS_BUDGET="${PARSE_BUDGET}"; fi
+
+          # Path to write human-readable analysis; will be attached to PR body
+          GAUSS_ANALYSIS_FILE="$RUNNER_TEMP/gauss_analysis.txt"
+
+          if [ -z "${GAUSS_API_KEY}" ]; then
+            echo "Missing MORPH_GAUSS_TOKEN secret" >&2
+            exit 1
+          fi
+
+          # Build common arguments
+          ARGS=("$CMD_NAME")
+          [ -n "${GAUSS_API_URL}" ] && ARGS+=(--base-url "$GAUSS_API_URL")
+          ARGS+=(--token "$GAUSS_API_KEY")
+          ARGS+=(--project-name "$PROJECT_NAME")
+          ARGS+=(--git-url "${{ steps.meta.outputs.repo_url }}")
+          ARGS+=(--git-rev "${{ steps.meta.outputs.git_rev }}")
+          [ -n "${REPO_PAT_TOKEN}" ] && ARGS+=(--git-pat "$REPO_PAT_TOKEN")
+          [ -n "${GAUSS_INIT_CMD}" ] && ARGS+=(--init-cmd "$GAUSS_INIT_CMD")
+          [ -n "${GAUSS_BUDGET}" ] && ARGS+=(--budget "$GAUSS_BUDGET")
+          [ -n "${GAUSS_BATCH_SIZE}" ] && ARGS+=(--batch-size "$GAUSS_BATCH_SIZE")
+          [ -n "${GAUSS_ANALYSIS_FILE}" ] && ARGS+=(--analysis-file "$GAUSS_ANALYSIS_FILE")
+          ARGS+=(--output-dir "$RUNNER_TEMP/gauss_json" --export-dir "$RUNNER_TEMP/gauss_updates" --base-dir "..")
+
+          # Add params for the appropriate subcommand
+          if [ -n "${{ steps.parse.outputs.params }}" ]; then
+            if [ "$CMD_NAME" = "gauss-prove" ]; then
+              printf '%s\n' ${{ steps.parse.outputs.params }} >> $RUNNER_TEMP/.lean_names_list
+              mapfile -t NAMES < <(printf '%s\n' ${{ steps.parse.outputs.params }})
+              ARGS+=("${NAMES[@]}")
+            else
+              printf '%s\n' ${{ steps.parse.outputs.params }} >> $RUNNER_TEMP/.stmt_labels_list
+              mapfile -t LABELS < <(printf '%s\n' ${{ steps.parse.outputs.params }})
+              ARGS+=("${LABELS[@]}")
+            fi
+          fi
+          uv run --python 3.12.11 main.py "${ARGS[@]}" > "$RUNNER_TEMP/gauss_output.txt" 2>&1
+
+      - name: Extract Gauss summary
+        if: steps.parse.outputs.cmd_name == 'gauss-prove' || steps.parse.outputs.cmd_name == 'gauss-statement'
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/gauss_output.txt"
+          SUM="$RUNNER_TEMP/gauss_summary.txt"
+          if [ -f "$OUT" ]; then
+            start_line=$(grep -n "--- Gauss Summary BEGIN ---" "$OUT" | cut -d: -f1 | head -n1 || true)
+            end_line=$(grep -n "--- Gauss Summary END ---" "$OUT" | cut -d: -f1 | head -n1 || true)
+            if [ -n "${start_line:-}" ] && [ -n "${end_line:-}" ] && [ "$end_line" -gt "$start_line" ]; then
+              sed -n "$((start_line+1)),$((end_line-1))p" "$OUT" | sed 's/^\s\+//;s/\s\+$//' > "$SUM"
+            else
+              echo "" > "$SUM"
+            fi
+          fi
+
+      - name: Apply returned files
+        if: steps.parse.outputs.cmd_name == 'gauss-prove' || steps.parse.outputs.cmd_name == 'gauss-statement'
+        id: apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ensure gauss-sdk (runner-only checkout) is not committed
+          echo "gauss-sdk/" >> .git/info/exclude
+          git rm -r --cached --quiet gauss-sdk || true
+          echo "Ensured gauss-sdk/ is excluded from commits."
+          EXPORT_DIR="$RUNNER_TEMP/gauss_updates"
+          if [ ! -d "$EXPORT_DIR" ]; then
+            echo "No gauss_updates directory found; nothing to apply."
+            echo "applied=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Copying merged updates from $EXPORT_DIR into repository root..."
+          if command -v rsync >/dev/null 2>&1; then
+            rsync -a "$EXPORT_DIR/" .
+          else
+            cp -R "$EXPORT_DIR/." .
+          fi
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit after applying returned files."
+            echo "applied=0" >> "$GITHUB_OUTPUT"
+          else
+            MSG="${{ steps.parse.outputs.cmd_name }}: apply updates"
+            git commit -m "$MSG"
+            echo "applied=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push branch (if changes)
+        if: steps.apply.outputs.applied == '1'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git push --set-upstream origin "${{ steps.branch.outputs.name }}"
+
+      - name: Open PR
+        id: open_pr
+        if: steps.apply.outputs.applied == '1'
+        uses: actions/github-script@v7
+        env:
+          BASE_REF: ${{ steps.base.outputs.ref }}
+        with:
+          script: |
+            const { repo, owner } = context.repo;
+            const isPR = context.eventName === 'issue_comment' && !!context.payload.issue.pull_request;
+            let baseRef = process.env.BASE_REF;
+            if (isPR) {
+              const issue_number = context.payload.issue.number;
+              const prInfo = await github.rest.pulls.get({ owner, repo, pull_number: issue_number });
+              baseRef = prInfo.data.base.ref;
+            }
+            const cmdName = `${{ steps.parse.outputs.cmd_name }}`;
+            const title = `${cmdName} updates`;
+            // Include the formalization/proof summary and analysis extracted earlier (if available)
+            let summary = '';
+            let analysis = '';
+            try {
+              const fs = require('fs');
+              summary = fs.readFileSync(`${process.env.RUNNER_TEMP}/gauss_summary.txt`, 'utf8').trim();
+            } catch (e) {
+              // optional
+            }
+            try {
+              const fs = require('fs');
+              analysis = fs.readFileSync(`${process.env.RUNNER_TEMP}/gauss_analysis.txt`, 'utf8');
+            } catch (e) {
+              // optional
+            }
+            // Truncate analysis to keep PR body within limits
+            const MAX_LEN = 60000; // stay well under GitHub's 65k limit
+            let analysisBlock = '';
+            if (analysis && analysis.trim()) {
+              const truncated = analysis.length > MAX_LEN ? analysis.slice(0, MAX_LEN) + "\n\n(truncated)" : analysis;
+              analysisBlock = `\n\n<details><summary>Analysis</summary>\n\n\u0060\u0060\u0060text\n${truncated}\n\u0060\u0060\u0060\n\n</details>`;
+            }
+            const pr = await github.rest.pulls.create({
+              owner,
+              repo,
+              head: `${owner}:${{ steps.branch.outputs.name }}`,
+              base: baseRef,
+              title,
+              body: (isPR
+                ? `This PR was created automatically from @${context.actor}'s command "${{ steps.parse.outputs.cmd }}" on PR #${context.payload.issue.number}.`
+                : `This PR was created automatically from @${context.actor}'s manual run (workflow_dispatch) of "${{ steps.parse.outputs.cmd }}" against base \"${baseRef}\".`)
+                + (summary ? `\n\n### Formalization summary\n\n${summary}` : '')
+                + analysisBlock
+            });
+            core.info(`Opened PR #${pr.data.number}`);
+            core.setOutput('pr_number', pr.data.number);
+
+      - name: Comment results on thread
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { repo, owner } = context.repo;
+            const issue_number = context.payload.issue.number;
+            const isPR = !!context.payload.issue.pull_request;
+            const cmd = `"${{ steps.parse.outputs.cmd }}"`.replace(/^"|"$/g, '');
+            const params = `"${{ steps.parse.outputs.params }}"`.replace(/^"|"$/g, '');
+            const cmdName = `"${{ steps.parse.outputs.cmd_name }}"`.replace(/^"|"$/g, '');
+            let body = `Ran ${cmd} on ${isPR ? 'PR' : 'Issue'} #${issue_number}.`;
+            const applied = `"${{ steps.apply.outputs.applied }}"`.replace(/^"|"$/g, '');
+            body += `\n\n- ${cmdName === 'gauss-prove' ? 'Names' : 'Labels'} requested: \`${params || '(auto-discovered)'}\``;
+            body += `\n- Changes applied: \`${applied === '1' ? 'yes' : 'no'}\``;
+            if (applied === '1') {
+              try {
+                const branch = `"${{ steps.branch.outputs.name }}"`.replace(/^"|"$/g, '');
+                const result = await github.rest.pulls.list({ owner, repo, state: 'open', head: `${owner}:${branch}` });
+                if (result && Array.isArray(result.data) && result.data.length > 0) {
+                  body += `\n- Opened PR: #${result.data[0].number}`;
+                }
+              } catch (e) {
+                // ignore lookup failures
+              }
+            }
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+
+      - name: Add run summary (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const cmd = `"${{ steps.parse.outputs.cmd }}"`.replace(/^"|"$/g, '');
+            const params = `"${{ steps.parse.outputs.params }}"`.replace(/^"|"$/g, '');
+            const cmdName = `"${{ steps.parse.outputs.cmd_name }}"`.replace(/^"|"$/g, '');
+            let summary = `Ran ${cmd} via workflow_dispatch on base "${{ steps.base.outputs.ref }}".`;
+            const applied = `"${{ steps.apply.outputs.applied }}"`.replace(/^"|"$/g, '');
+            summary += `\n\n- ${cmdName === 'gauss-prove' ? 'Names' : 'Labels'} requested: \`${params || '(auto-discovered)'}\``;
+            summary += `\n- Changes applied: \`${applied === '1' ? 'yes' : 'no'}\``;
+            try {
+              const fs = require('fs');
+              const sum = fs.readFileSync(`${process.env.RUNNER_TEMP}/gauss_summary.txt`, 'utf8');
+              if (sum && sum.trim()) {
+                summary += `\n\n### Formalization summary\n\n${sum.trim()}`;
+              }
+            } catch (e) {
+              // optional
+            }
+            try {
+              const fs = require('fs');
+              const analysis = fs.readFileSync(`${process.env.RUNNER_TEMP}/gauss_analysis.txt`, 'utf8');
+              if (analysis && analysis.trim()) {
+                const MAX_LEN = 30000; // keep step summary concise
+                const truncated = analysis.length > MAX_LEN ? analysis.slice(0, MAX_LEN) + "\n\n(truncated)" : analysis;
+                summary += `\n\n<details><summary>Analysis</summary>\n\n\u0060\u0060\u0060text\n${truncated}\n\u0060\u0060\u0060\n\n</details>`;
+              }
+            } catch (e) {
+              // optional
+            }
+            await core.summary.addRaw(summary).write();
