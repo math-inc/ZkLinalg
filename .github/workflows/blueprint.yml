@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   build_project:
-    runs-on: [self-hosted, linux, x64, morph, large]
+    runs-on: ubuntu-latest
     name: Build project
     steps:
       - name: Checkout project

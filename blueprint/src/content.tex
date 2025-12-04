@@ -1,7 +1,564 @@
-% In this file you should put the actual content of the blueprint.
-% It will be used both by the web and the print version.
-% It should *not* include the \begin{document}
-%
-% If you want to split the blueprint content into several files then
-% the current file can be a simple sequence of \input. Otherwise It
-% can start with a \section or \chapter for instance.
+\section{Foundational Probabilistic Calculus (§1.4)}
+
+\begin{definition}[Probabilistic Implication]\label{def:probabilistic_implication}\lean{ProbImplies}\leanok
+Let $\Omega$ be a sample space equipped with a probability measure. Let $r$ and $r'$ be random variables defined on $\Omega$ taking values in sets $\mathcal{R}$ and $\mathcal{R}'$ respectively. Let $P: \mathcal{R} \to \{\text{true}, \text{false}\}$ and $Q: \mathcal{R}' \to \{\text{true}, \text{false}\}$ be predicates.
+For a real number $p \in [0, 1]$, we write $P(r) \implies_p Q(r')$ if and only if:
+\[ \prob{P(r) \land \neg Q(r')} \leq p \]
+\end{definition}
+
+\begin{lemma}[Chaining]\label{lem:chaining_probabilistic}\leanok
+\uses{def:probabilistic_implication}
+Let $\Omega$ be a sample space. Let $r, r', r''$ be random variables on $\Omega$. Let $P, Q, T$ be predicates on the codomains of $r, r', r''$ respectively.
+For any real numbers $p, p' \in [0, 1]$, if:
+\begin{enumerate}
+    \item $P(r) \implies_p Q(r')$
+    \item $Q(r') \implies_{p'} T(r'')$
+\end{enumerate}
+then:
+\[ P(r) \implies_{p+p'} T(r'') \]
+\end{lemma}
+\begin{proof}
+Union bound on disjunction $(P(r) \land \neg Q(r')) \lor (Q(r') \land \neg T(r''))$ covering $(P(r) \land \neg T(r''))$.
+\end{proof}
+
+\begin{lemma}[Contrapositive]\label{lem:contrapositive_probabilistic}\leanok
+\uses{def:probabilistic_implication}
+Let $r$ be a random variable. Let $P, Q$ be predicates. For any $p \in [0, 1]$, if $P(r) \implies_p Q(r)$, then $\neg Q(r) \implies_p \neg P(r)$.
+\end{lemma}
+\begin{proof}
+Identical event probabilities by definition.
+\end{proof}
+
+\begin{lemma}[Conjunction]\label{lem:conjunction_probabilistic}\leanok
+\uses{def:probabilistic_implication}
+Let $r, r'$ be independent random variables. Let $P$ be a predicate on $r$, $T$ be a predicate on $r'$, and $Q$ be a deterministic statement (a constant predicate). Assume the events $\{P(r)\}$ and $\{T(r')\}$ are measurable.
+For any $p, p' \in [0, 1]$, if:
+\begin{enumerate}
+    \item $P(r) \implies_p Q$
+    \item $T(r') \implies_{p'} Q$
+\end{enumerate}
+then:
+\[ P(r) \land T(r') \implies_{pp'} Q \]
+\end{lemma}
+\begin{proof}
+Multiplication of independent failure probabilities.
+\end{proof}
+
+\section{Linear Code Infrastructure (§1.1-1.3)}
+
+\begin{definition}[Reed-Solomon Matrix]\label{def:reed_solomon_matrix}\lean{reedSolomonMatrix}\leanok
+Let $\mathbb{F}$ be a finite field. Let $m, n$ be positive integers with $m \geq n$. Let $\alpha_1, \ldots, \alpha_m \in \mathbb{F}$ be distinct elements.
+The Reed-Solomon matrix $G \in \mathbb{F}^{m \times n}$ is defined such that for all $i \in \{1, \ldots, m\}$ and $j \in \{1, \ldots, n\}$:
+\[ G_{ij} = \alpha_i^{j-1} \]
+\end{definition}
+
+\begin{definition}[Code Distance]\label{def:code_distance}\lean{codeHasDistanceAtLeast}\leanok
+Let $G \in \mathbb{F}^{m \times n}$ be a matrix. Its distance is
+\[
+  d(G) = \min_{0 \neq x \in \mathbb{F}^n} \|Gx\|_0,
+\]
+where $\|\cdot\|_0$ denotes the Hamming weight. A linear code has distance $d$ if $d(G) \geq d$.
+\end{definition}
+
+\begin{lemma}[Reed-Solomon Distance]\label{lem:reed_solomon_distance}\leanok
+\uses{def:reed_solomon_matrix,def:code_distance}
+For any integers $m \geq n \geq 1$ and any field $\mathbb{F}$ with $|\mathbb{F}| \geq m$, let $G$ be the Reed-Solomon matrix defined in Definition~\ref{def:reed_solomon_matrix}.
+Then for all nonzero vectors $x \in \mathbb{F}^n \setminus \{0\}$:
+\[ \|Gx\|_0 \geq m - n + 1 \]
+where $\|\cdot\|_0$ denotes the Hamming weight.
+\end{lemma}
+\begin{proof}
+A nonzero polynomial of degree $\leq n-1$ has at most $n-1$ roots; thus at least $m-(n-1)$ of the evaluations are nonzero.
+\end{proof}
+
+\begin{definition}[Hadamard Matrix]\label{def:hadamard_matrix}\lean{hadamardMatrix}\leanok
+Let $\mathbb{F}$ be a finite field and $n$ be a positive integer. Let $m = |\mathbb{F}|^n$. Let $v_1, \ldots, v_m$ be an enumeration of all vectors in $\mathbb{F}^n$.
+The Hadamard matrix $G \in \mathbb{F}^{m \times n}$ is defined such that the $i$-th row of $G$ is $v_i^T$.
+\end{definition}
+
+\begin{lemma}[Hadamard Distance]\label{lem:hadamard_distance}\leanok
+\uses{def:hadamard_matrix,def:code_distance}
+Let $G$ be the Hadamard matrix from Definition~\ref{def:hadamard_matrix}. For all nonzero $x \in \mathbb{F}^n \setminus \{0\}$:
+\[ \|Gx\|_0 \geq |\mathbb{F}|^n - |\mathbb{F}|^{n-1} \]
+\end{lemma}
+\begin{proof}
+For any nonzero message $x$, the equation $y^T x = 0$ forces one coordinate of $y$; at most $|\mathbb{F}|^{n-1}$ solutions exist.
+\end{proof}
+
+\section{Core Reduction Lemmas (§3.1)}
+
+\begin{lemma}[Zero Check]\label{lem:zero_check}\leanok
+\uses{def:code_distance}
+Let $\mathbb{F}$ be a finite field. Let $G \in \mathbb{F}^{m \times n}$ be a matrix such that for all $z \in \mathbb{F}^n \setminus \{0\}$, $\|Gz\|_0 \geq d$.
+Let $x \in \mathbb{F}^n$ be an arbitrary vector. Let $r$ be a random variable uniformly distributed on $\{1, \ldots, m\}$.
+Then:
+\[ (Gx)_r = 0 \implies_{p} x = 0 \]
+with $p = 1 - d/m$.
+\end{lemma}
+\begin{proof}
+If $x \neq 0$, $Gx$ has at least $d$ nonzero entries; a random coordinate hits one with probability $d/m$.
+\end{proof}
+
+\begin{lemma}[Matrix Zero Check]\label{lem:matrix_zero_check}\leanok
+\uses{lem:zero_check}
+Let $G \in \mathbb{F}^{m \times n}$ be a matrix with distance $d$.
+Let $X \in \mathbb{F}^{k \times n}$ be an arbitrary matrix. Let $\tilde{g}_r$ denote the $r$-th row of $G$ transposed (a column vector).
+Let $r$ be uniform on $\{1, \ldots, m\}$.
+Then:
+\[ X\tilde{g}_r = 0 \implies_{p} X = 0 \]
+with $p = 1 - d/m$.
+\end{lemma}
+\begin{proof}
+Interpret columns as rows, apply Lemma~\ref{lem:zero_check} to each row $\tilde{x}_j^T$.
+\end{proof}
+
+\begin{lemma}[Reduced Matrix Zero Check]\label{lem:reduced_matrix_zero_check}\leanok
+\uses{lem:zero_check,lem:chaining_probabilistic}
+Let $G \in \mathbb{F}^{m \times n}$ be a code with distance $d$. Let $G' \in \mathbb{F}^{m' \times k}$ be a code with distance $d'$.
+Let $X \in \mathbb{F}^{k \times n}$.
+Let $r$ and $r'$ be independent random variables uniformly distributed on $\{1, \ldots, m\}$ and $\{1, \ldots, m'\}$ respectively.
+Let $\tilde{g}_r$ be the $r$-th row of $G$ (transposed) and $\tilde{g}'_{r'}$ be the $r'$-th row of $G'$ (transposed).
+Then:
+\[ \tilde{g}_{r'}'^{\!T} X \tilde{g}_r = 0 \implies_{p_{\text{total}}} X = 0 \]
+where $p_{\text{total}} = (1 - d/m) + (1 - d'/m')$.
+\end{lemma}
+\begin{proof}
+Chain two zero checks: inner randomness reduces $X$ to vector $\tilde{g}_{r'}'^{\!T} X$, outer reduces to a scalar.
+\end{proof}
+
+\begin{lemma}[Vector Subspace Check]\label{lem:vector_subspace_check}
+\uses{lem:matrix_zero_check}
+Let $V \subseteq \mathbb{F}^k$ be a linear subspace. Let $C \in \mathbb{F}^{s \times k}$ be a parity-check matrix for $V$ (i.e., $V = \ker C$).
+Let $G \in \mathbb{F}^{m \times n}$ be a code with distance $d$.
+Let $X \in \mathbb{F}^{k \times n}$. Let $r$ be uniform on $\{1, \ldots, m\}$.
+Then:
+\[ X\tilde{g}_r \in V \implies_{p} \forall i \in \{1, \ldots, n\}, X_i \in V \]
+with $p = 1 - d/m$, where $X_i$ denotes the $i$-th column of $X$.
+\end{lemma}
+\begin{proof}
+Convert to a zero check: $C(X\tilde{g}_r) = 0$. Apply Lemma~\ref{lem:matrix_zero_check} to $CX$.
+\end{proof}
+
+\begin{lemma}[Polynomial Zero Check Corollary]\label{lem:polynomial_zero_check}\leanok
+\uses{lem:zero_check,lem:reed_solomon_distance}
+Let $f \in \mathbb{F}[x]$ be a polynomial of degree at most $n-1$. Let $r$ be a random variable uniformly distributed on $\mathbb{F}$.
+Then:
+\[ f(r) = 0 \implies_{p} f \equiv 0 \]
+with $p = (n-1)/|\mathbb{F}|$.
+\end{lemma}
+\begin{proof}
+Specialize Lemma~\ref{lem:zero_check} to the Reed-Solomon matrix with $m = |\mathbb{F}|$ and $d = m-n+1$.
+\end{proof}
+
+\begin{lemma}[Kronecker Product Distance]\label{lem:kroncker_product_distance}\leanok
+Let $G \in \mathbb{F}^{m \times n}$ have distance $d$ and $G' \in \mathbb{F}^{m' \times k}$ have distance $d'$.
+Then the Kronecker product code $G' \otimes G$ has distance at least $dd'$.
+\end{lemma}
+\begin{proof}
+Any nonzero tensor $z$ factors as $z = y \otimes x$ with $y \neq 0$, $x \neq 0$. The support of $(G' \otimes G)z$ contains the Cartesian product of the supports of $G'y$ and $Gx$, yielding at least $dd'$ nonzero entries.
+\end{proof}
+
+\begin{lemma}[Kronecker Product Bound]\label{lem:kroncker_product_bound}\leanok
+\uses{lem:reduced_matrix_zero_check,lem:kroncker_product_distance}
+Let $G \in \mathbb{F}^{m \times n}$ have distance $d$ and $G' \in \mathbb{F}^{m' \times k}$ have distance $d'$.
+Then the Kronecker product code $G' \otimes G$ has distance at least $dd'$.
+Consequently, checking if $X = 0$ using a random coordinate of $(G' \otimes G)\operatorname{vec}(X)$ fails with probability $p \le 1 - \frac{dd'}{mm'}$.
+\end{lemma}
+\begin{proof}
+Apply Lemma~\ref{lem:kroncker_product_distance}; compare with Lemma~\ref{lem:reduced_matrix_zero_check}.
+\end{proof}
+
+\section{Sparsity and Distance Checks (§3.2)}
+
+\begin{lemma}[Sparsity Check]\label{lem:sparsity_check}\leanok
+Let $x \in \mathbb{F}^k$. Let $q \in \{0, \ldots, k\}$. Let $r$ be uniform on $\{1, \ldots, k\}$.
+Then:
+\[ x_r = 0 \implies_{p} \|x\|_0 \leq q \]
+with $p = 1 - \frac{q+1}{k}$.
+\end{lemma}
+\begin{proof}
+Direct counting argument.
+\end{proof}
+
+\begin{lemma}[Matrix Sparsity Check]\label{lem:matrix_sparsity_check}\leanok
+\uses{lem:zero_check}
+Let $X \in \mathbb{F}^{k \times n}$. Let $G \in \mathbb{F}^{m \times n}$ with distance $d$. Let $q$ be an integer.
+Let $r$ be uniform on $\{1, \ldots, m\}$.
+Then:
+\[ \left\|\sum_{i=1}^n G_{ri} x_i\right\|_0 \leq q \implies_{p} \|X\|_{\text{row-0}} \leq q \]
+where $\|X\|_{\text{row-0}}$ is the number of nonzero rows of $X$, and $p = (q+1)(1 - d/m)$.
+\end{lemma}
+\begin{proof}
+Select $q+1$ nonzero rows to form $\hat{X}$. For each row, apply the zero check; use a union bound.
+\end{proof}
+
+\begin{lemma}[Sparsity-Zero Composition]\label{lem:sparsity_zero_composition}\leanok
+\uses{lem:sparsity_check,lem:zero_check}
+Let $x \in \mathbb{F}^k$ and let $0 \le q < k$.
+Let $G \in \mathbb{F}^{m \times k}$ be a linear code of distance $d$, in the sense that
+every nonzero codeword $Gz$ has Hamming weight at least $d$.
+
+Let $S$ be a random subset of $\{1,\ldots,k\}$ of fixed size $|S|$, drawn \emph{uniformly}
+among all subsets of that size.
+Let $r$ be a random index, independent of $S$, drawn uniformly from $\{1,\ldots,m\}$.
+Write $x_S$ for the restriction of $x$ to coordinates in $S$.
+
+Consider the test that accepts iff $(G x_S)_r = 0$. Then
+\[
+  \Pr\big[ (G x_S)_r = 0 \ \wedge\ \|x\|_0 > q \big]
+  \;\le\;
+  \left(1 - \frac{d}{m}\right)
+  \;+\;
+  \left(1 - \frac{q+1}{k}\right)^{|S|}.
+\]
+Equivalently, the implication “$(Gx_S)_r = 0 \Rightarrow \|x\|_0 \le q$” holds with
+failure probability at most
+\[
+  p_{\mathrm{total}} \le \left(1 - \frac{d}{m}\right) + \left(1 - \frac{q+1}{k}\right)^{|S|}.
+\]
+\end{lemma}
+\begin{proof}
+Chain the zero check on the encoded sample with the sparsity check on the original vector.
+\end{proof}
+
+\section{Subspace Distance Check: The Central Challenge (§3.2.3)}
+
+\begin{definition}[Subspace Distance]\label{def:subspace_distance}\lean{subspaceDistance}\leanok
+Let $V \subseteq \mathbb{F}^k$ be a subspace. The distance of $V$, denoted $d'$, is defined as:
+\[ d' = \min_{x \in V \setminus \{0\}} \|x\|_0 \]
+\end{definition}
+
+\begin{definition}[q-Close to Subspace]\label{def:q_close_subspace}\lean{qCloseToSubspace}\leanok
+Let $V \subseteq \mathbb{F}^k$ be a subspace. A matrix $X \in \mathbb{F}^{k \times n}$ is $q$-close to $V$ if there exists a matrix $Y \in \mathbb{F}^{k \times n}$ such that:
+\begin{enumerate}
+    \item Every column of $Y$ is in $V$.
+    \item The number of nonzero rows of $X-Y$ is at most $q$.
+\end{enumerate}
+\end{definition}
+
+\begin{lemma}[Linear Independence from Distance]\label{lem:linear_independence_from_distance}\leanok
+\uses{def:code_distance}
+Let $G \in \mathbb{F}^{m \times n}$ be a code with distance $d$, and assume $n \ge 2$. Let $R \subseteq \{1, \ldots, m\}$.
+If $|R| > m-d$, then there exist indices $r, r' \in R$ such that the rows $\tilde{g}_r, \tilde{g}_{r'}$ are linearly independent.
+\end{lemma}
+\begin{proof}
+If all rows in $R$ were linearly dependent, some nonzero $z$ would satisfy $(Gz)_r = 0$ for $|R| > m-d$ indices, violating distance $d$ of $G$.
+\end{proof}
+
+\begin{lemma}[Unique Decoding Radius]\label{lem:unique_decoding_radius}\leanok
+\uses{def:subspace_distance}
+Let $V \subseteq \mathbb{F}^k$ be a subspace with distance $d'$. Let $X \in \mathbb{F}^{k \times n}$.
+If $X$ is $q$-close to $V$ with $q < d'/2$, then there exist unique matrices $Y, \Xi \in \mathbb{F}^{k \times n}$ such that $X = Y + \Xi$, the columns of $Y$ are in $V$, and $\|\Xi\|_{\text{row-0}} \leq q$.
+\end{lemma}
+\begin{proof}
+Since $2q < d'$, we are within the unique decoding radius. Minimality of the subspace distance guarantees uniqueness.
+\end{proof}
+
+\begin{lemma}[Subspace Distance Deterministic Core]\label{lem:subspace_distance_check_n2_deterministic_core}
+\uses{lem:linear_independence_from_distance, lem:unique_decoding_radius}
+Let $\alpha$ be a field. Let $m, k, d, q \in \mathbb{N}$.
+Let $V \subseteq \alpha^k$ be a subspace with subspace distance $d'$.
+Let $G \in \alpha^{m \times 2}$ be a matrix with code distance at least $d$.
+Let $X \in \alpha^{k \times 2}$ be an arbitrary matrix.
+Assume $4q < d'$ (Hypothesis \texttt{h\_q}).
+
+Define the set of ``bad'' indices (where the projection appears close to $V$) as:
+\[ S = \{ i \in \{1, \dots, m\} \mid \exists v \in V, \| (X G_i) - v \|_0 \le q \}, \]
+where $G_i$ is the $i$-th row of $G$.
+
+If $|S| > m - d$, then there exists a matrix $Y \in \alpha^{k \times 2}$ such that:
+\begin{enumerate}
+    \item The columns of $Y$ belong to $V$.
+    \item For all $i \in S$, $\| (X - Y)G_i \|_0 \le q$.
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+Since $|S| > m - d$ and $G$ has distance $d$, by the \emph{Linear Independence from Distance} principle (Lemma~\ref{lem:linear_independence_from_distance}), there exist indices $r_1, r_2 \in S$ such that the rows $G_{r_1}$ and $G_{r_2}$ are linearly independent.
+
+Since $r_1, r_2 \in S$, the vectors $w_1 = X G_{r_1}$ and $w_2 = X G_{r_2}$ are $q$-close to $V$. Specifically, there exist $v_1, v_2 \in V$ such that $\|w_1 - v_1\|_0 \le q$ and $\|w_2 - v_2\|_0 \le q$.
+The hypothesis $4q < d'$ implies $2q < d'/2$. By the \emph{Unique Decoding Radius} principle (Lemma~\ref{lem:unique_decoding_radius}), $v_1$ and $v_2$ are the \emph{unique} vectors in $V$ satisfying this proximity.
+
+We define the matrix $Y \in \alpha^{k \times 2}$ by solving the linear system dictated by the basis rows $G_{r_1}, G_{r_2}$:
+\[ Y G_{r_1} = v_1 \quad \text{and} \quad Y G_{r_2} = v_2. \]
+Since $G_{r_1}, G_{r_2}$ are linearly independent in $\mathbb{F}^2$, such a $Y$ exists and is unique. Furthermore, since $v_1, v_2 \in V$ and $V$ is a subspace, the columns of $Y$ must lie in $V$.
+
+It remains to show that for any other $i \in S$, $\| (X - Y)G_i \|_0 \le q$.
+Let $i \in S$. By definition of $S$, there exists some $u \in V$ such that $\| X G_i - u \|_0 \le q$.
+However, the row $G_i$ can be written as a linear combination $G_i = c_1 G_{r_1} + c_2 G_{r_2}$.
+Ideally, we expect $u = c_1 v_1 + c_2 v_2 = Y G_i$.
+If $u \neq Y G_i$, we would construct a codeword in $V$ with insufficient weight, contradicting the subspace distance $d'$.
+Thus, the unique close vector for index $i$ is exactly $Y G_i$.
+Therefore, $\| X G_i - Y G_i \|_0 \le q$.
+\end{proof}
+
+\begin{lemma}[Subspace Distance Check Reduction]\label{lem:subspace_distance_check_n2_main_reduction}
+\uses{lem:subspace_distance_check_n2_deterministic_core,lem:matrix_sparsity_check}
+Let definitions be as in Lemma~\ref{lem:subspace_distance_check_n2_deterministic_core}.
+Let $\Omega$ be a probability space with measure $\mu$, and $r: \Omega \to \{1, \dots, m\}$ be a uniformly distributed random variable.
+Assume $X$ is \emph{not} $q$-close to $V$ (Hypothesis \texttt{h\_not\_close}).
+
+Consider the event $E \subseteq \Omega$:
+\[ E = \{ \omega \in \Omega \mid \exists v \in V, \| (X G_{r(\omega)}) - v \|_0 \le q \}. \]
+Then:
+\[ \mu(E) \le (q+1)\left(1 - \frac{d}{m}\right). \]
+\end{lemma}
+\begin{proof}
+Let $S$ be the set of indices defined in Lemma~\ref{lem:subspace_distance_check_n2_deterministic_core}. Note that $\mu(E) = \frac{|S|}{m}$.
+We distinguish two cases based on the size of $S$.
+
+\textbf{Case 1: $|S| \le m - d$.}
+Here, $\frac{|S|}{m} \le \frac{m-d}{m} = 1 - \frac{d}{m}$.
+Since $q \ge 0$, we have $1 \le q+1$, so:
+\[ 1 - \frac{d}{m} \le (q+1)\left(1 - \frac{d}{m}\right). \]
+The bound holds.
+
+\textbf{Case 2: $|S| > m - d$.}
+We apply Lemma~\ref{lem:subspace_distance_check_n2_deterministic_core}. This yields a matrix $Y$ with columns in $V$ such that for all $i \in S$, $\| (X - Y)G_i \|_0 \le q$.
+Let $\Xi = X - Y$.
+The condition above states that for all $i \in S$, $\| \Xi G_i \|_0 \le q$.
+
+By Hypothesis \texttt{h\_not\_close}, $X$ is not $q$-close to $V$. Since $Y$ has columns in $V$, if $\Xi$ had $\le q$ non-zero rows, then $X$ would be $q$-close to $V$ (via the decomposition $X = Y + \Xi$), which is a contradiction.
+Therefore, $\Xi$ must have strictly more than $q$ non-zero rows: $\|\Xi\|_{\text{row-0}} > q$.
+
+We now apply the \emph{Matrix Sparsity Check} (Lemma~\ref{lem:matrix_sparsity_check}) to the matrix $\Xi$.
+The probability that a random projection $\Xi G_r$ has Hamming weight $\le q$, given that $\|\Xi\|_{\text{row-0}} > q$, is bounded by:
+\[ \Pr_{r \sim U(\{1,\dots,m\})} [ \| \Xi G_r \|_0 \le q ] \le (q+1)\left(1 - \frac{d}{m}\right). \]
+Since $S \subseteq \{ i \mid \| \Xi G_i \|_0 \le q \}$, we have:
+\[ \mu(E) = \frac{|S|}{m} \le (q+1)\left(1 - \frac{d}{m}\right). \]
+\end{proof}
+
+\begin{theorem}[Subspace Distance Check: Special Case $n=2$]\label{thm:subspace_distance_check_n2}
+\uses{def:subspace_distance,def:q_close_subspace,lem:matrix_sparsity_check,lem:linear_independence_from_distance,lem:unique_decoding_radius}
+Let $V \subseteq \mathbb{F}^k$ be a subspace with distance $d'$.
+Let $G \in \mathbb{F}^{m \times 2}$ be a code with distance $d$.
+Let $X \in \mathbb{F}^{k \times 2}$.
+Let $q$ be an integer such that $q < d'/4$.
+Let $r$ be uniform on $\{1, \ldots, m\}$.
+Then:
+\[ \left\|\sum_{i=1}^2 G_{ri} x_i - V\right\|_0 \leq q \implies_{p} X \text{ is } q\text{-close to } V \]
+where $\|z - V\|_0 = \min_{v \in V} \|z - v\|_0$, and $p = (q+1)(1 - d/m)$.
+\end{theorem}
+\begin{proof}
+\textbf{Part 1 (Linear Independence)}: Let $R = \{r : \|\sum_i G_{ri} x_i - V\|_0 \leq q\}$. If $|R| > m-d$, by Lemma~\ref{lem:linear_independence_from_distance} there exist linearly independent rows $\tilde{g}_r, \tilde{g}_{r'} \in R$. Then every $Xz$ is $2q$-close to $V$.
+
+\textbf{Part 2 (Unique Decoding)}: Since $2q < d'/2$, by Lemma~\ref{lem:unique_decoding_radius} we have unique decomposition $x_i = y_i + \xi_i$ with $y_i \in V$ and $\|\xi_i\|_0 \leq 2q$.
+
+\textbf{Part 3 (Contradiction)}: Assume some $\bar{y}_r \neq 0$. Using linear independence, there exists $s$ such that $G_{r1} + sG_{r2} = 0$ for all $r \in R$. This forces $|R| \leq m-d$, contradiction. Thus all $\bar{y}_r = 0$.
+
+\textbf{Conclusion}: The left side reduces to $\|\sum_i G_{ri} \xi_i\|_0 \leq q$, and by Lemma~\ref{lem:matrix_sparsity_check}, $X$ is $q$-close to $V$.
+\end{proof}
+
+\paragraph{Remark on integer thresholds.}
+In the Lean development, subspace distances and sparsity parameters are encoded as natural numbers, so real inequalities like $q < d'/4$ or $q < d' - q$ are implemented using integer conditions such as $4q < \operatorname{subspaceDistance}(V)$ or $q < \operatorname{subspaceDistance}(V) - q$.
+These formulations are equivalent up to floor/ceiling effects and simply reflect that Hamming weights take integer values.
+
+\begin{lemma}[Subspace Distance Contradiction]\label{lem:subspace_distance_contradiction}\leanok
+\uses{lem:linear_independence_from_distance,def:code_distance}
+Let $G \in \mathbb{F}^{m \times 2}$ with distance $d$. Let $R \subseteq \{1, \ldots, m\}$ with $|R| > m-d$.
+If there exist scalars $Y_1, Y_2 \in \mathbb{F}$, not both zero, such that for all $r \in R$ we have
+\[
+G_{r1}Y_1 + G_{r2}Y_2 = 0,
+\]
+this contradicts the distance property, since it gives a nonzero codeword with too many zero coordinates.
+\end{lemma}
+
+\section{FRI Protocol Construction (§4.2)}
+
+\begin{definition}[FRI Subspace Structure]\label{def:fri_subspace_structure}
+Let $n$ be a power of $2$. Let $\mathbb{F}$ be a field.
+Let $V \subseteq \mathbb{F}^n$ be the space of evaluations of polynomials of degree $\leq s$ at points $\{\alpha_1,\ldots,\alpha_n\}$.
+Let $V' \subseteq \mathbb{F}^{n/2}$ be evaluations of degree $\leq s$ polynomials with only even-degree terms at squared points $\{\alpha_1^2,\ldots,\alpha_{n/2}^2\}$.
+Then $V$ decomposes as:
+\[ V = T_1 V' \oplus T_2 V' \]
+where $T_1 = \begin{bmatrix} I_{n/2} \\ I_{n/2} \end{bmatrix}$ and $T_2 = \begin{bmatrix} D \\ -D \end{bmatrix}$ with $D = \operatorname{diag}(\alpha_1,\ldots,\alpha_{n/2})$.
+\end{definition}
+
+\begin{lemma}[Basis Alignment for Diagonal Operators]\label{lem:basis_alignment_diagonal}
+Let $x_1, x_2 \in \mathbb{F}^{n/2}$, and let $X = [x_1, x_2]$.
+If $X$ is $q$-close to a subspace $V' \subseteq \mathbb{F}^{n/2}$, then for any scalars $a,b \in \mathbb{F}$ the vector
+\[
+z := a x_1 + b x_2
+\]
+is within Hamming distance at most $q$ of $V'$; that is, there exists $v \in V'$ such that $\|z-v\|_0 \le q$.
+\end{lemma}
+\begin{proof}
+If $X$ is $q$-close to $V'$, there exists a matrix $Y = [y_1,y_2]$ with columns in $V'$ and at most $q$ rows where $X$ and $Y$ differ.
+Set $v := a y_1 + b y_2 \in V'$.
+Outside the rows where $X$ and $Y$ differ, we have $z = v$, so at most $q$ coordinates of $z-v$ are nonzero.
+\end{proof}
+
+\begin{lemma}[FRI Basis Alignment]\label{lem:fri_basis_alignment}\leanok
+\uses{def:fri_subspace_structure,lem:basis_alignment_diagonal}
+Let $T_1, T_2$ be the FRI matrices from Definition~\ref{def:fri_subspace_structure}.
+Assume that for all $y \in V'$, both $T_1 y$ and $T_2 y$ lie in $V$, and that $V = T_1 V' \oplus T_2 V'$.
+For any $x_1, x_2 \in \mathbb{F}^{n/2}$, if the matrix $[x_1, x_2]$ is $q$-close to $V'$, then:
+\[ \|T_1 x_1 + T_2 x_2 - V\|_0 \leq 2q \]
+\end{lemma}
+\begin{proof}
+The matrices $T_1$ and $T_2$ are diagonal with a shared sparsity pattern; each nonzero row in $X-Y$ contributes to at most two nonzero entries in the sum.
+\end{proof}
+
+\begin{lemma}[FRI Reduction Step]\label{lem:fri_reduction_step}\notready
+\uses{thm:subspace_distance_check_n2,lem:fri_basis_alignment,lem:sparsity_zero_composition}
+In the FRI protocol context, fix a matrix $X = [x_1, x_2] \in \mathbb{F}^{m \times 2}$ and a target vector $y \in \mathbb{F}^{2m}$.
+Assume that:
+\begin{enumerate}
+    \item $X$ is $q$-close to $V'$ in the sense of Definition~\ref{def:q_close_subspace} (this is a \emph{global} hypothesis about the ``true'' matrix, not part of the bad event).
+    \item The subspace distance $d'(V')$ satisfies $q < d'/4$ (equivalently, in the Lean formalization, $4q < \operatorname{subspaceDistance}(V')$, as in Theorem~\ref{thm:subspace_distance_check_n2}).
+\end{enumerate}
+Then verifying $\|y - V\|_0 \leq 3q$ reduces to verifying two conditions:
+\begin{enumerate}
+    \item (Subspace Distance) $\|G_{r1}x_1 + G_{r2}x_2 - V'\|_0 \leq q$, which holds with failure probability $p \leq (q+1)(1-d/m)$.
+    \item (Sparsity) $y_S = (T_1x_1 + T_2x_2)_S$, which holds with failure probability $p' \leq (1-(q+1)/n)^{|S|}$.
+\end{enumerate}
+\end{lemma}
+\begin{proof}
+Apply Theorem~\ref{thm:subspace_distance_check_n2} with $\ell=2$ and Lemma~\ref{lem:fri_basis_alignment} giving $q'=2q$, so $q+q' = 3q$.
+\end{proof}
+
+\begin{lemma}[FRI Recursive Application]\label{lem:fri_recursive_application}
+\uses{lem:fri_reduction_step}
+For any round $i \geq 0$, the problem reduces to verifying that a vector in $\mathbb{F}^{n/2^i}$ is $q/3^i$-close to the subspace $V^{(i)}$.
+\end{lemma}
+\begin{proof}
+Induction: each round applies Lemma~\ref{lem:fri_reduction_step} with a geometrically decreasing error budget.
+\end{proof}
+
+\section{Error Analysis and Parameter Balancing (§4.2)}
+
+\begin{lemma}[Round-wise Error]\label{lem:round_wise_error}\notready
+\uses{lem:fri_reduction_step}
+In round $i$ of the FRI protocol, assume that the folded subspace $V^{(i)}$ has distance $d_i'$ with $q/3^i < d_i'/4$ (equivalently, $4\,(q/3^i) < \operatorname{subspaceDistance}(V^{(i)})$ in Lean), and that the round-$i$ matrix is $(q/3^i)$-close to $V^{(i)}$.
+With distance budget $q/3^i$, the failure probability $p_i$ then satisfies:
+\[ p_i \leq \left(\frac{q}{3^i} + 1\right)\left(1 - \frac{d}{m}\right) + \left(1 - \frac{q/3^i + 1}{n/2^i}\right)^{|S_i|} \]
+where $|S_i|$ is the number of queries in round $i$.
+\end{lemma}
+\begin{proof}
+Direct from Lemma~\ref{lem:fri_reduction_step} with substituted parameters.
+\end{proof}
+
+\begin{lemma}[Geometric Summation]\label{lem:geometric_summation}\leanok
+\uses{lem:round_wise_error}
+Let $k$ be the number of rounds, and suppose $d \le m$ and $n > 0$.
+For each $i \in \{0,\dots,k-1\}$, write $q_i = q/3^i$, $n_i = n/2^i$, and assume
+\[
+0 < n_i \quad\text{and}\quad 0 \le \lambda_i := \frac{\lfloor q_i \rfloor + 1\rfloor}{\lfloor n_i \rfloor} \le 1.
+\]
+If we set sample sizes $|S_i| = \eta(3/2)^i$ and have per-round bounds
+\[
+p_i \le \left(\frac{q}{3^i} + 1\right)\left(1 - \frac{d}{m}\right)
+  + \left(1 - \lambda_i\right)^{|S_i|},
+\]
+then the total failure probability $p_{\text{total}}$ satisfies:
+\[ p_{\text{total}} \leq \left(\frac{3}{2}q + k\right)\left(1 - \frac{d}{m}\right) + k \exp\left(-\eta \frac{q}{n}\right) \]
+\end{lemma}
+\begin{proof}
+First term: $\sum_{i=1}^k (q/3^i + 1) \leq \frac{3}{2}q + k$ by a geometric series.
+
+Second term: Use $(1-\lambda)^\gamma \leq \exp(-\gamma\lambda)$ with $\lambda = \frac{q/3^i + 1}{n/2^i} \geq \frac{q}{n}(2/3)^i$. The sum $\sum_{i=1}^k \exp(-\eta \frac{q}{n})$ yields factor $k$.
+\end{proof}
+
+\begin{lemma}[Query Count]\label{lem:query_count}\leanok
+\uses{lem:round_wise_error}
+For $|S_i| = \eta(3/2)^i$ for $i = 0,\dots,k-1$, the total number of queries is:
+\[ \sum_{i=0}^{k-1} |S_i| = 2\eta\left((3/2)^{k} - 1\right) \]
+\end{lemma}
+\begin{proof}
+Sum the geometric series with ratio $3/2$.
+\end{proof}
+
+\begin{lemma}[Concrete Parameters]\label{lem:concrete_parameters}
+\uses{lem:geometric_summation,lem:reed_solomon_distance}
+Assume $G$ is a Reed-Solomon code with $1 - d/m = 1/|\mathbb{F}|$.
+Let $|\mathbb{F}| \approx 2^{128}$, $n = 2^{32}$, $q = n/8$, $k=28$, and $\eta = 470$.
+For each round $i \in \{0,\dots,k-1\}$, choose an \emph{integer} sample size $|S_i|$
+such that $|S_i| \ge \eta \left(\frac{3}{2}\right)^i$ (for instance,
+$|S_i| = \lceil \eta (3/2)^i \rceil$).
+Then:
+\[ p_{\text{total}} < 2^{-79} \]
+\end{lemma}
+\begin{proof}
+First term negligible due to large field: $(\frac{3}{2}q + k)/|\mathbb{F}| \approx 2^{30}/2^{128} \approx 2^{-98.4}$.
+
+Second term: $k \exp(-\eta q/n) = 28 \exp(-470/8) \approx 2^{-79.95}$. Thus
+\[
+  p_{\text{total}} \lesssim 2^{-98.4} + 2^{-79.95} < 2^{-79},
+\]
+so the claimed bound holds.
+\end{proof}
+
+
+\section{Main Theorem: FRI Security}
+
+\begin{theorem}[FRI Protocol Security]\label{thm:fri_security_complete}
+\uses{lem:geometric_summation,lem:concrete_parameters,def:fri_subspace_structure}
+Let $n, n_0$ be integers. Let $k = \log_2(n/n_0)$.
+Let $G$ be a Reed-Solomon matrix over $\mathbb{F}$ with $|\mathbb{F}| \gg n$.
+Let $q = n/8$.
+For each round $i \in \{1, \ldots, k\}$, perform an \emph{integer} number of queries
+$|S_i|$ satisfying $|S_i| \ge \eta(3/2)^i$ for some parameter
+$\eta = O(\log(1/\epsilon))$ (for example, $|S_i| = \lceil \eta (3/2)^i \rceil$).
+For any vector $y \in \mathbb{F}^n$, if $y$ is $q$-far from the subspace $V$, then the verifier accepts with probability at most:
+\[ \epsilon = \left(\frac{3}{2}q + k\right)\frac{1}{|\mathbb{F}|} + k \exp\left(-\eta \frac{q}{n}\right) \]
+The total query complexity is $O((3/2)^k) = O(n^{\log_2(3/2)})$.
+\end{theorem}
+\begin{proof}
+Combine Lemma~\ref{lem:geometric_summation} for the error bound with Lemma~\ref{lem:concrete_parameters} for a concrete instantiation. The recursive subspace structure from Definition~\ref{def:fri_subspace_structure} justifies each round's validity via Lemma~\ref{lem:fri_recursive_application}.
+\end{proof}
+
+\begin{corollary}[Exponential Gap]\label{cor:exponential_gap}\leanok
+\uses{thm:fri_security_complete,lem:query_count}
+Let $n_0$ be a constant and $n \to \infty$.
+The ratio of FRI query complexity to naive verification complexity (which is $\Omega(n)$) is:
+\[ \frac{O(n^{0.585})}{n} = O(n^{-0.415}) \]
+This approaches $0$ exponentially in $k = \log n$.
+\end{corollary}
+\begin{proof}
+As $n \to \infty$ with $n/2^k = n_0$ constant, the ratio of FRI queries to message size is $(3/2)^k / 2^k = (3/4)^k \to 0$ exponentially.
+\end{proof}
+
+\section{Open Conjecture and Generalizations}
+
+\begin{conjecture}[General Subspace Distance Check]\label{conj:general_subspace_distance}
+For any integer $\ell \geq 3$, any code $G$ with distance $d$, and any $q < d'/2$:
+The probabilistic implication
+\[ \left\|\sum_{i=1}^\ell G_{ri} x_i - V\right\|_0 \leq q \implies_{p} X \text{ is } q\text{-close to } V \]
+holds with $p \leq (q+1)(1 - d/m)$ for uniformly random $r$.
+This conjecture is not used in the main FRI security theorem but records a natural strengthening of Theorem~\ref{thm:subspace_distance_check_n2} for future work.
+\end{conjecture}
+
+\begin{lemma}[Kronecker Generalization]\label{lem:kroncker_generalization}\leanok
+\uses{lem:kroncker_product_bound}
+For the tensor product of $s$ codes $G_1,\ldots,G_s$ with parameters $(m_j, d_j)$, the distance bound of the product code is $\prod_j d_j$.
+Consequently, the zero-check failure probability is bounded by $1 - \prod_j (d_j/m_j)$, which is strictly less than the chaining bound $1 - \sum_j (1 - d_j/m_j)$ (assuming non-trivial codes).
+\end{lemma}
+\begin{proof}
+Apply Lemma~\ref{lem:kroncker_product_distance} iteratively; the product bound is strictly tighter than the sum bound unless all but one code is trivial.
+\end{proof}
+
+\section{Appendix: Supporting Infrastructure}
+
+\begin{lemma}[Empty Set Sum]\label{lem:empty_set_sum}\lean{empty_set_sum}\leanok
+Let $S = \emptyset$. For any function $f$, $\sum_{s \in S} f(s) = 0$.
+\end{lemma}
+\begin{proof}
+Definition of the empty sum.
+\end{proof}
+
+\begin{lemma}[Parity-Check Matrix]\label{lem:parity_check_matrix}\lean{parity_check_matrix}\leanok
+For any subspace $V \subseteq \mathbb{F}^m$ of dimension $k$, there exists a matrix $C \in \mathbb{F}^{(m-k) \times m}$ such that $V = \{x \in \mathbb{F}^m : Cx = 0\}$.
+\end{lemma}
+\begin{proof}
+Standard linear algebra: represent the subspace as the nullspace of a full-rank matrix.
+\end{proof}
+
+\begin{lemma}[Wootters Strengthening]\label{lem:wootters_strengthening}
+\uses{thm:subspace_distance_check_n2}
+The statement of Theorem~\ref{thm:subspace_distance_check_n2} holds under the weaker assumption $q < d' - q$ (equivalently $2q < d'$), which is implied by $q < d'/2$.
+Throughout the FRI soundness pipeline we continue to use Theorem~\ref{thm:subspace_distance_check_n2} with the stronger hypothesis $q < d'/4$ (matching the integer form $4q < \operatorname{subspaceDistance}(V)$ in Lean); Lemma~\ref{lem:wootters_strengthening} records Wootters' improvement for future refinements but is not needed for the main security theorem.
+\end{lemma}
+\begin{proof}
+The unique decoding radius is $d'/2$; the proof only requires $(d'-q)$-closeness for uniqueness.
+In the Lean formalization, where Hamming weights are natural numbers, these real hypotheses are expressed as inequalities such as $4q < \operatorname{subspaceDistance}(V)$ or $q < \operatorname{subspaceDistance}(V) - q$, which correspond to the same thresholds up to harmless floor/ceiling effects.
+Completing the formal Lean proof of this strengthening depends on the same deterministic ``good rows $\Rightarrow$ decoding'' infrastructure used in Theorem~\ref{thm:subspace_distance_check_n2}, and is therefore deferred until that core argument is fully developed.
+\end{proof}
