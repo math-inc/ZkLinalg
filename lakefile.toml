@@ -1,5 +1,5 @@
-name           = "Project"
-defaultTargets = ["Project"]
+name           = "ZkLinalg"
+defaultTargets = ["ZkLinalg"]
 
 [leanOptions]
 pp.unicode.fun          = true
@@ -12,4 +12,4 @@ name = "mathlib"
 git  = "https://github.com/leanprover-community/mathlib4.git"
 
 [[lean_lib]]
-name = "Project"
+name = "ZkLinalg"
