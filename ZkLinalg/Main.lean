@@ -1317,6 +1317,17 @@ by
     exact bot_le
   · exact subspace_distance_check_n2_main_reduction V G hG X q h_q μ r h_unif h_close
 
+/-- Basis Alignment for Diagonal Operators: if a two-column matrix `X = [x₁ x₂]` is `q`-close to a subspace `V'`, then for any diagonal weights `D : Fin k → α`, any linear combination `a · x₁ + D ⊙ x₂` is within Hamming distance ≤ `q` of `V'`. -/
+lemma basis_alignment_diagonal
+  {α : Type*} [Semiring α] [DecidableEq α] [Zero α]
+  {k : ℕ}
+  (V' : Submodule α (Fin k → α)) (q : ℕ)
+  (X : Matrix (Fin k) (Fin 2) α)
+  (hclose : qCloseToSubspace V' q X) :
+  ∀ a b : α, ∃ v ∈ V',
+    (Finset.univ.filter
+      (fun i : Fin k => (a * X i 0 + b * X i 1) ≠ v i)).card ≤ q :=
+by intro a b; obtain ⟨Y, hcols, hcard⟩ := hclose; exact ⟨_, V'.add_mem (V'.smul_mem a (hcols 0)) (V'.smul_mem b (hcols 1)), (Finset.card_le_card fun i hi => by simp at hi ⊢; exact if h : X i 0 = Y i 0 then Or.inr (fun heq => hi (by simp [h, heq])) else Or.inl h).trans hcard⟩
 
 /-- FRI Basis Alignment: with `T1 = [I; I]` and `T2 = [D; −D]` (for a diagonal `D : Fin m → α`), if `X = [x₁ x₂] : Matrix (Fin m) (Fin 2) α` is `q`-close to `V'`, then `T1 x₁ + T2 x₂` is within Hamming distance ≤ `2q` of the larger space `V` (as a vector in `α^{2m}`). -/
 lemma fri_basis_alignment

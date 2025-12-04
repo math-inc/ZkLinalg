@@ -232,7 +232,7 @@ If $|R| > m-d$, then there exist indices $r, r' \in R$ such that the rows $\tild
 If all rows in $R$ were linearly dependent, some nonzero $z$ would satisfy $(Gz)_r = 0$ for $|R| > m-d$ indices, violating distance $d$ of $G$.
 \end{proof}
 
-\begin{lemma}[Unique Decoding Radius]\label{lem:unique_decoding_radius}\leanok \lean{ZkLinalg.uniqueDecodingRadius}
+\begin{lemma}[Unique Decoding Radius]\label{lem:unique_decoding_radius}\leanok \lean{ZkLinalg.unique_decoding_radius}
 \uses{def:subspace_distance}
 Let $V \subseteq \mathbb{F}^k$ be a subspace with distance $d'$. Let $X \in \mathbb{F}^{k \times n}$.
 If $X$ is $q$-close to $V$ with $q < d'/2$, then there exist unique matrices $Y, \Xi \in \mathbb{F}^{k \times n}$ such that $X = Y + \Xi$, the columns of $Y$ are in $V$, and $\|\Xi\|_{\text{row-0}} \leq q$.

@@ -18,7 +18,7 @@ ZkLinalg.sparsity_zero_composition
 ZkLinalg.subspaceDistance
 ZkLinalg.qCloseToSubspace
 ZkLinalg.linear_independence_from_distance
-ZkLinalg.uniqueDecodingRadius
+ZkLinalg.unique_decoding_radius
 ZkLinalg.subspace_distance_check_n2_deterministic_core
 ZkLinalg.subspace_distance_check_n2_main_reduction
 ZkLinalg.subspace_distance_check_n2
