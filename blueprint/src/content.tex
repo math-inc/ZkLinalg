@@ -21,14 +21,6 @@ then:
 Union bound on disjunction $(P(r) \land \neg Q(r')) \lor (Q(r') \land \neg T(r''))$ covering $(P(r) \land \neg T(r''))$.
 \end{proof}
 
-\begin{lemma}[Contrapositive]\label{lem:contrapositive_probabilistic}
-\uses{def:probabilistic_implication}
-Let $r$ be a random variable. Let $P, Q$ be predicates. For any $p \in [0, 1]$, if $P(r) \implies_p Q(r)$, then $\neg Q(r) \implies_p \neg P(r)$.
-\end{lemma}
-\begin{proof}
-Identical event probabilities by definition.
-\end{proof}
-
 \begin{lemma}[Conjunction]\label{lem:conjunction_probabilistic}\leanok \lean{ZkLinalg.conjunction_probabilistic}
 \uses{def:probabilistic_implication}
 Let $r, r'$ be independent random variables. Let $P$ be a predicate on $r$, $T$ be a predicate on $r'$, and $Q$ be a deterministic statement (a constant predicate). Assume the events $\{P(r)\}$ and $\{T(r')\}$ are measurable.
