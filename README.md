@@ -13,7 +13,7 @@ All the Lean statements and proofs were produced by **Gauss**, Math Inc.'s autof
 ## Highlights
 
 - **Target:** full security proof of the FRI protocol.
-- **Scope:** ≈1.8k lines of Lean.
+- **Scope:** ≈2k lines of Lean.
 - **Workflow:** AI-generated formalization from a LaTeX blueprint with human scaffolding.
 - **Foundation:** linear-algebraic view on Reed–Solomon codes, distance, and random subspace tests.
 - **Result:** a complete Lean theorem stating FRI soundness with concrete parameters, error < $2^{-79}$, and $O(n^{0.585})$ query complexity.

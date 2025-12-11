@@ -1,16 +1,115 @@
 import Mathlib
 
+/-!
+# FRI Protocol Security
+
+Formalization of the FRI (Fast Reed-Solomon IOP of Proximity) soundness analysis.
+
+The main result is `fri_security_complete`, which bounds the probability that a
+cheating prover escapes detection across k rounds of the protocol. We also provide
+`fri_security_complete_production` for the deployed variant where query sets expand
+deterministically via square roots.
+
+See: Evans–Angeris, "Succinct Proofs and Linear Algebra" (https://eprint.iacr.org/2023/1478)
+-/
+
 open MeasureTheory
 
 namespace ZkLinalg
 
+/-! ## FRI Protocol Structures -/
+
+/-- The algebraic structure underlying FRI folding. The larger space V (dimension 2m)
+contains the folded space V' (dimension m) embedded in two ways: T₁ = [I; I] duplicates
+vectors, while T₂ = [D; -D] applies a signed diagonal. The folding operation extracts
+the "even" and "odd" parts of a function on a coset, and these embeddings correspond
+to representing those parts. -/
+structure FRISubspaceStructure {α : Type*} [Ring α] (m : ℕ)
+    (V : Submodule α (Fin (m + m) → α))
+    (V' : Submodule α (Fin m → α))
+    (D : Fin m → α) : Prop where
+  /-- `T₁`: duplication map preserves subspace membership -/
+  T1 : ∀ y ∈ V', (fun i : Fin (m + m) => Fin.addCases y y i) ∈ V
+  /-- `T₂`: signed diagonal map preserves subspace membership -/
+  T2 : ∀ y ∈ V', (fun i : Fin (m + m) =>
+      Fin.addCases (fun j => D j * y j) (fun j => - D j * y j) i) ∈ V
+
+/-- Random variable r is uniformly distributed over Fin n. -/
+structure UniformFin {Ω : Type*} [MeasurableSpace Ω]
+    (μ : Measure Ω) (n : ℕ) (r : Ω → Fin n) : Prop where
+  uniform : ∀ i : Fin n, μ {ω | r ω = i} = (1 : ENNReal) / (n : ENNReal)
+
+/-- Random variable S is uniformly distributed over s-subsets of Fin n. -/
+structure UniformSubset {Ω : Type*} [MeasurableSpace Ω]
+    (μ : Measure Ω) (n s : ℕ) (S : Ω → Finset (Fin n)) : Prop where
+  card : ∀ ω, (S ω).card = s
+  uniform : ∀ A : Finset (Fin n), A.card = s →
+      μ {ω | S ω = A} = (1 : ENNReal) / ((Nat.choose n s : ℕ) : ENNReal)
+
+/-- The dimension schedule for FRI: dimensions halve each round as we fold polynomials.
+Concretely, m_seq i · 2^i = m_seq 0, so round i operates on vectors of length m_seq i. -/
+structure FRIDimensionSchedule (k : ℕ) (m_seq : ℕ → ℕ) : Prop where
+  /-- Initial dimension is positive -/
+  pos : 0 < m_seq 0
+  /-- Dimension halves each round: `m_seq i * 2^i = m_seq 0` -/
+  halving : ∀ i < k, m_seq i * 2^i = m_seq 0
+
+namespace FRIDimensionSchedule
+
+variable {k : ℕ} {m_seq : ℕ → ℕ}
+
+/-- Each round's dimension is positive. -/
+lemma pos_of_lt (h : FRIDimensionSchedule k m_seq) (i : ℕ) (hi : i < k) : 0 < m_seq i := by
+  have heq := h.halving i hi
+  by_contra hc; push_neg at hc
+  simp only [Nat.le_zero] at hc
+  simp [hc] at heq
+  exact h.pos.ne' heq.symm
+
+/-- Each round's dimension is bounded by the initial dimension. -/
+lemma le_initial (h : FRIDimensionSchedule k m_seq) (i : ℕ) (hi : i < k) : m_seq i ≤ m_seq 0 := by
+  have heq := h.halving i hi
+  calc m_seq i ≤ m_seq i * 2^i := Nat.le_mul_of_pos_right (m_seq i) (pow_pos (by decide : 0 < 2) i)
+    _ = m_seq 0 := heq
+
+end FRIDimensionSchedule
+
+/-- What the (possibly cheating) prover sends: at each round i, a two-column matrix
+X_seq i being folded, and oracle values y_seq i claimed to be evaluations of the
+folded polynomial. -/
+structure FRIProverData {α : Type*} [Ring α] (m_seq : ℕ → ℕ) where
+  /-- Matrices being folded at each round -/
+  X_seq : ∀ i, Matrix (Fin (m_seq i)) (Fin 2) α
+  /-- Oracle values at each round -/
+  y_seq : ∀ i, Fin (m_seq i + m_seq i) → α
+
+/-- Sampling parameters for FRI. The proximity parameter q decays geometrically as q/3^i
+at round i (since proximity triples each fold), while sample sizes grow as s_i = η·(3/2)^i
+to maintain detection probability. -/
+structure FRISamplingParams (k : ℕ) (m_seq : ℕ → ℕ) where
+  /-- Base proximity parameter -/
+  q : ℕ
+  /-- Base sample count -/
+  η : ℕ
+  /-- Sample size schedule -/
+  s : ℕ → ℕ
+  /-- Sample sizes follow geometric growth: `s i = η * (3/2)^i` -/
+  hs : ∀ i < k, (s i : ℝ) = (η : ℝ) * ((3 : ℝ) / 2) ^ i
+  /-- Lambda condition: per-round proximity bounded by dimension -/
+  h_lambda : ∀ i < k, (((q / 3^i : ℕ) + 1 : ℝ) ≤ ((2 * m_seq 0 / 2^i : ℕ) : ℝ))
+  /-- Positivity of per-round dimensions -/
+  h_den_pos : ∀ i < k, 0 < (2 * m_seq 0) / 2^i
+
+/-! ## Probability Lemmas -/
+
+/-- P(r) implies Q(r') with error at most p. -/
 @[simp] def ProbImplies {Ω : Type*} [MeasurableSpace Ω]
     (μ : Measure Ω) [IsProbabilityMeasure μ]
     {R R' : Type*} (r : Ω → R) (P : R → Prop)
     (r' : Ω → R') (Q : R' → Prop) (p : ℝ) : Prop :=
   (0 ≤ p ∧ p ≤ 1) ∧ μ {ω | P (r ω) ∧ ¬ Q (r' ω)} ≤ ENNReal.ofReal p
 
-/-- Chaining: if `μ {ω | P(r ω) ∧ ¬ Q(r' ω)} ≤ p` and `μ {ω | Q(r' ω) ∧ ¬ T(r'' ω)} ≤ p'`, with `p,p' ∈ [0,1]`, then `μ {ω | P(r ω) ∧ ¬ T(r'' ω)} ≤ p + p'`. -/
+/-- Chaining probabilistic implications: error bounds add. -/
 lemma chaining_probabilistic
     {Ω R R' R'' : Type*} [MeasurableSpace Ω]
     (μ : Measure Ω) [IsProbabilityMeasure μ]
@@ -26,12 +125,14 @@ by classical
    simpa [ENNReal.ofReal_add hp.1 hp'.1] using (measure_mono fun _ h => if hQ : _ then .inr ⟨hQ, h.2⟩
      else .inl ⟨h.1, hQ⟩).trans ((measure_union_le _ _).trans (add_le_add h₁ h₂))
 
-/-- Reed–Solomon matrix with evaluation points `αs : Fin m → α`: the entry is `(αs i)^(j)`, with column index `j` used as a natural exponent. -/
+/-! ## Reed-Solomon Codes -/
+
+/-- Reed–Solomon matrix: entry (i,j) is (αs i)^j. -/
 @[simp] def reedSolomonMatrix {α : Type*} [Semiring α]
     {m n : ℕ} (αs : Fin m → α) : Matrix (Fin m) (Fin n) α :=
   fun i j => (αs i) ^ (j : ℕ)
 
-/-- Conjunction: for independent sources `r` and `r'`, if both `P(r)` and `T(r')` imply a deterministic statement `Q` with error probabilities `p` and `p'`, then `P(r) ∧ T(r')` implies `Q` with error at most `p * p'`. -/
+/-- For independent sources, conjunctions multiply error probabilities. -/
 lemma conjunction_probabilistic
     {Ω R R' : Type*} [MeasurableSpace Ω]
     [MeasurableSpace R] [MeasurableSpace R']
@@ -53,16 +154,16 @@ by
     _ ≤ ENNReal.ofReal (p * p') := by
         simp [ENNReal.ofReal_mul hp.1, mul_le_mul' (by simpa [hQ] using h₁) (by simpa [hQ] using h₂)]
 
-/-- A matrix (generator of a linear code) has distance at least `d` if every nonzero codeword has Hamming weight ≥ d. -/
+/-! ## Code Distance -/
+
+/-- The linear code generated by G has minimum distance at least d. Equivalently,
+every nonzero codeword Gx has Hamming weight ≥ d. -/
 @[simp] def codeHasDistanceAtLeast {α : Type*} [Semiring α] [DecidableEq α] [Zero α]
     {m n : ℕ} (G : Matrix (Fin m) (Fin n) α) (d : ℕ) : Prop :=
   ∀ x : (Fin n → α), x ≠ 0 →
     (Finset.univ.filter (fun i : Fin m => Matrix.mulVec G x i ≠ 0)).card ≥ d
 
-/-- Independence + finite-union bound: for any finite set `A` of values of `r'`,
-`μ({r = i ∧ r' ∈ A}) ≤ μ({r = i}) * ∑_{j∈A} μ({r' = j})`.
-This packages a union bound over `A` together with the product rule provided by `h_indep`.
--/
+/-- Union bound with independence: μ({r = i ∧ r' ∈ A}) ≤ μ({r = i}) · Σⱼ∈ₐ μ({r' = j}). -/
 lemma measure_inter_preimage_finset_le_mul_sum
   {Ω α β : Type*} [MeasurableSpace Ω]
   (μ : Measure Ω) [IsProbabilityMeasure μ]
@@ -88,9 +189,13 @@ lemma zero_positions_card_le_of_distance
   (hG' : codeHasDistanceAtLeast G' d')
   (y : Fin k → α) (hy : y ≠ 0) :
   (Finset.univ.filter (fun j : Fin m' => Matrix.mulVec G' y j = 0)).card ≤ m' - d' :=
-by simp [Nat.eq_sub_of_add_eq $ Finset.filter_card_add_filter_neg_card_eq_card (G'.mulVec y · = 0), Nat.sub_le_sub_left (hG' y hy)]
+by
+  simp [Nat.eq_sub_of_add_eq $ Finset.filter_card_add_filter_neg_card_eq_card (G'.mulVec y · = 0),
+    Nat.sub_le_sub_left (hG' y hy)]
 
-/-- Reduced matrix zero check: sampling independent random rows `g_r` of `G` and `g'_{r'}` of `G'`, the scalar `g'_{r'}^T · (X · g_r)` being zero implies `X = 0` with error at most `(1 - d/m) + (1 - d'/m')`. -/
+/-- Reduced matrix zero check: sampling independent random rows `g_r` of `G` and `g'_{r'}` of `G'`,
+the scalar `g'_{r'}^T · (X · g_r)` being zero implies `X = 0` with error at most
+`(1 - d/m) + (1 - d'/m')`. -/
 lemma reduced_matrix_zero_check
     {α : Type*} [CommSemiring α] [DecidableEq α] [Zero α]
     {m n k m' : ℕ}
@@ -112,43 +217,81 @@ lemma reduced_matrix_zero_check
       ≤ ENNReal.ofReal ((1 - (d : ℝ) / (m : ℝ)) + (1 - (d' : ℝ) / (m' : ℝ))) :=
 by
   by_cases hX0 : X = 0; · simp [hX0]
-  obtain ⟨i0, j0, hxij⟩ : ∃ i : Fin k, ∃ j : Fin n, X i j ≠ 0 := by by_contra h; push_neg at h; exact hX0 (by ext i j; simpa using h i j)
-  set y := fun ω => Matrix.mulVec X (fun j => G (r ω) j); set E := {ω | (∑ j, G' (r' ω) j * y ω j) = 0 ∧ ¬X = 0}
-  set E1 := {ω | y ω = 0 ∧ ¬X = 0}; set E2 := {ω | (∑ j, G' (r' ω) j * y ω j) = 0 ∧ y ω ≠ 0}
+  obtain ⟨i0, j0, hxij⟩ : ∃ i : Fin k, ∃ j : Fin n, X i j ≠ 0 := by
+    by_contra h; push_neg at h; exact hX0 (by ext i j; simpa using h i j)
+  set y := fun ω => Matrix.mulVec X (fun j => G (r ω) j)
+  set E := {ω | (∑ j, G' (r' ω) j * y ω j) = 0 ∧ ¬X = 0}
+  set E1 := {ω | y ω = 0 ∧ ¬X = 0}
+  set E2 := {ω | (∑ j, G' (r' ω) j * y ω j) = 0 ∧ y ω ≠ 0}
   have hx0_ne : (fun j => X i0 j) ≠ 0 := fun hx => hxij (by simpa using congrArg (· j0) hx)
   have hycol_ne : (fun i => X i j0) ≠ 0 := fun h => hxij (by simpa using congrArg (· i0) h)
   have hd_le_m : d ≤ m := by simpa [Fintype.card_fin] using (hG _ hx0_ne).trans (Finset.card_filter_le _ _)
   have hd'_le_m' : d' ≤ m' := by simpa [Fintype.card_fin] using (hG' _ hycol_ne).trans (Finset.card_filter_le _ _)
   have hE1_le : μ E1 ≤ ENNReal.ofReal (1 - (d : ℝ) / m) := by
     set yG := fun i => Matrix.mulVec G (fun j => X i0 j) i; set S := Finset.univ.filter fun i => yG i = 0
-    have hE1_sub : E1 ⊆ {ω | yG (r ω) = 0} := fun ω hω => by simpa [yG, Matrix.mulVec, dotProduct, mul_comm] using (by simpa [y, Matrix.mulVec, dotProduct] using congrArg (· i0) hω.1 : (∑ j : Fin n, X i0 j * G (r ω) j) = 0)
+    have hE1_sub : E1 ⊆ {ω | yG (r ω) = 0} := fun ω hω => by
+      simpa [yG, Matrix.mulVec, dotProduct, mul_comm] using
+        (by simpa [y, Matrix.mulVec, dotProduct] using congrArg (· i0) hω.1 :
+          (∑ j : Fin n, X i0 j * G (r ω) j) = 0)
     have hμ_yG0 : μ {ω | yG (r ω) = 0} ≤ ((m - d : ℕ) : ENNReal) / m := by
-      have h_event : {ω | yG (r ω) = 0} = ⋃ i ∈ S, {ω | r ω = i} := by ext ω; simp only [Set.mem_setOf_eq, Set.mem_iUnion, Finset.mem_filter, Finset.mem_univ, true_and, S]; exact ⟨fun h => ⟨r ω, h, rfl⟩, fun ⟨i, hi, hri⟩ => by simp [hri, hi]⟩
+      have h_event : {ω | yG (r ω) = 0} = ⋃ i ∈ S, {ω | r ω = i} := by
+        ext ω
+        simp only [Set.mem_setOf_eq, Set.mem_iUnion, Finset.mem_filter, Finset.mem_univ,
+          true_and, S]
+        exact ⟨fun h => ⟨r ω, h, rfl⟩, fun ⟨i, hi, hri⟩ => by simp [hri, hi]⟩
       calc μ {ω | yG (r ω) = 0} ≤ ∑ i ∈ S, μ {ω | r ω = i} := by rw [h_event]; exact measure_biUnion_finset_le S _
-        _ ≤ _ := by simp [h_unif, Finset.sum_const, nsmul_eq_mul, div_eq_mul_inv]; exact mul_le_mul' (by exact_mod_cast ZkLinalg.zero_positions_card_le_of_distance G hG _ hx0_ne) le_rfl
+        _ ≤ _ := by
+          simp [h_unif, Finset.sum_const, nsmul_eq_mul, div_eq_mul_inv]
+          exact mul_le_mul'
+            (by exact_mod_cast ZkLinalg.zero_positions_card_le_of_distance G hG _ hx0_ne) le_rfl
     by_cases hm0 : m = 0; · simp [hm0]; exact prob_le_one
-    simpa [one_sub_div (Nat.cast_pos.mpr (Nat.pos_of_ne_zero hm0)).ne', Nat.cast_sub hd_le_m, ENNReal.ofReal_div_of_pos (Nat.cast_pos.mpr (Nat.pos_of_ne_zero hm0))] using (measure_mono hE1_sub).trans hμ_yG0
+    simpa [one_sub_div (Nat.cast_pos.mpr (Nat.pos_of_ne_zero hm0)).ne', Nat.cast_sub hd_le_m,
+      ENNReal.ofReal_div_of_pos (Nat.cast_pos.mpr (Nat.pos_of_ne_zero hm0))] using
+        (measure_mono hE1_sub).trans hμ_yG0
   have hE2_le : μ E2 ≤ ENNReal.ofReal (1 - (d' : ℝ) / m') := by
-    set yrow := fun i => Matrix.mulVec X fun j => G i j; set Z := fun i => Finset.univ.filter fun j => (∑ t, G' j t * yrow i t) = 0
-    set T := Finset.univ.filter fun i => yrow i ≠ 0; set C : ENNReal := (m' - d' : ℕ) / m'
+    set yrow := fun i => Matrix.mulVec X fun j => G i j
+    set Z := fun i => Finset.univ.filter fun j => (∑ t, G' j t * yrow i t) = 0
+    set T := Finset.univ.filter fun i => yrow i ≠ 0
+    set C : ENNReal := (m' - d' : ℕ) / m'
     have hE2_le_C : μ E2 ≤ C := by
-      have hμ_E2_le : μ E2 ≤ ∑ i ∈ T, μ {ω | r ω = i ∧ r' ω ∈ Z i} := (measure_mono fun ω hω => Set.mem_iUnion.2 ⟨r ω, Set.mem_iUnion.2 ⟨Finset.mem_filter.2 ⟨by simp, by simpa [yrow, y] using hω.2⟩, by simp only [Set.mem_setOf_eq, true_and]; exact Finset.mem_filter.2 ⟨by simp, by simpa [y, yrow] using hω.1⟩⟩⟩).trans (measure_biUnion_finset_le T _)
+      have hμ_E2_le : μ E2 ≤ ∑ i ∈ T, μ {ω | r ω = i ∧ r' ω ∈ Z i} :=
+        (measure_mono fun ω hω => Set.mem_iUnion.2 ⟨r ω, Set.mem_iUnion.2
+          ⟨Finset.mem_filter.2 ⟨by simp, by simpa [yrow, y] using hω.2⟩,
+           by simp only [Set.mem_setOf_eq, true_and]
+              exact Finset.mem_filter.2 ⟨by simp, by simpa [y, yrow] using hω.1⟩⟩⟩).trans
+          (measure_biUnion_finset_le T _)
       have hZ_bound : ∀ i ∈ T, (Z i).card ≤ m' - d' := fun i hi => ZkLinalg.zero_positions_card_le_of_distance G' hG' _ (Finset.mem_filter.mp hi).2
-      calc μ E2 ≤ ∑ i ∈ T, μ {ω | r ω = i} * (∑ j ∈ Z i, μ {ω | r' ω = j}) := hμ_E2_le.trans (Finset.sum_le_sum fun i hi => ZkLinalg.measure_inter_preimage_finset_le_mul_sum μ r r' h_indep i (Z i))
-        _ ≤ ∑ i ∈ T, μ {ω | r ω = i} * C := Finset.sum_le_sum fun i hi => by simp only [h_unif', Finset.sum_const, nsmul_eq_mul, C, div_eq_mul_inv, one_mul]; exact mul_le_mul_left' (mul_le_mul' (by exact_mod_cast hZ_bound i hi) le_rfl) _
+      calc μ E2
+          ≤ ∑ i ∈ T, μ {ω | r ω = i} * (∑ j ∈ Z i, μ {ω | r' ω = j}) :=
+            hμ_E2_le.trans (Finset.sum_le_sum fun i hi =>
+              ZkLinalg.measure_inter_preimage_finset_le_mul_sum μ r r' h_indep i (Z i))
+        _ ≤ ∑ i ∈ T, μ {ω | r ω = i} * C := Finset.sum_le_sum fun i hi => by
+            simp only [h_unif', Finset.sum_const, nsmul_eq_mul, C, div_eq_mul_inv, one_mul]
+            exact mul_le_mul_left' (mul_le_mul' (by exact_mod_cast hZ_bound i hi) le_rfl) _
         _ ≤ (∑ i ∈ T, μ {ω | r ω = i}) * C := by rw [Finset.sum_mul]
         _ ≤ 1 * C := mul_le_mul_right' (by
           by_cases hm0 : m = 0; · subst hm0; simp [T]
           simp only [h_unif, Finset.sum_const, nsmul_eq_mul]
-          have hT_le : (T.card : ENNReal) ≤ m := by have := Finset.card_le_univ T; simp [Fintype.card_fin] at this; exact_mod_cast this
-          exact (mul_le_mul' hT_le le_rfl).trans (by rw [ENNReal.mul_div_cancel' (by simp [hm0]) (by simp)])) _
+          have hT_le : (T.card : ENNReal) ≤ m := by
+            have := Finset.card_le_univ T; simp [Fintype.card_fin] at this; exact_mod_cast this
+          exact (mul_le_mul' hT_le le_rfl).trans
+            (by rw [ENNReal.mul_div_cancel' (by simp [hm0]) (by simp)])) _
         _ = C := one_mul C
     by_cases hm0' : m' = 0; · simp [hm0']; exact prob_le_one
-    simpa [C, one_sub_div (Nat.cast_pos.mpr (Nat.pos_of_ne_zero hm0')).ne', Nat.cast_sub hd'_le_m', ENNReal.ofReal_div_of_pos (Nat.cast_pos.mpr (Nat.pos_of_ne_zero hm0'))] using hE2_le_C
-  have hnonneg1 : 0 ≤ 1 - (d : ℝ) / m := by rcases eq_or_ne m 0 with rfl | hm0; simp; exact sub_nonneg.mpr (div_le_one_of_le₀ (by exact_mod_cast hd_le_m) (by positivity))
-  have hnonneg2 : 0 ≤ 1 - (d' : ℝ) / m' := by rcases eq_or_ne m' 0 with rfl | hm0'; simp; exact sub_nonneg.mpr (div_le_one_of_le₀ (by exact_mod_cast hd'_le_m') (by positivity))
-  have hE_subset : E ⊆ E1 ∪ E2 := fun ω ⟨hs, hX⟩ => by by_cases hy : y ω = 0 <;> [exact Or.inl ⟨hy, hX⟩; exact Or.inr ⟨hs, hy⟩]
-  simpa [E, ENNReal.ofReal_add hnonneg1 hnonneg2] using ((measure_mono hE_subset).trans (measure_union_le _ _)).trans (add_le_add hE1_le hE2_le)
+    simpa [C, one_sub_div (Nat.cast_pos.mpr (Nat.pos_of_ne_zero hm0')).ne', Nat.cast_sub hd'_le_m',
+      ENNReal.ofReal_div_of_pos (Nat.cast_pos.mpr (Nat.pos_of_ne_zero hm0'))] using hE2_le_C
+  have hnonneg1 : 0 ≤ 1 - (d : ℝ) / m := by
+    rcases eq_or_ne m 0 with rfl | hm0
+    · simp
+    · exact sub_nonneg.mpr (div_le_one_of_le₀ (by exact_mod_cast hd_le_m) (by positivity))
+  have hnonneg2 : 0 ≤ 1 - (d' : ℝ) / m' := by
+    rcases eq_or_ne m' 0 with rfl | hm0'
+    · simp
+    · exact sub_nonneg.mpr (div_le_one_of_le₀ (by exact_mod_cast hd'_le_m') (by positivity))
+  have hE_subset : E ⊆ E1 ∪ E2 := fun ω ⟨hs, hX⟩ => by
+    by_cases hy : y ω = 0 <;> [exact Or.inl ⟨hy, hX⟩; exact Or.inr ⟨hs, hy⟩]
+  simpa [E, ENNReal.ofReal_add hnonneg1 hnonneg2] using
+    ((measure_mono hE_subset).trans (measure_union_le _ _)).trans (add_le_add hE1_le hE2_le)
 
 /-- Matrix zero check: sampling a random row `g_r` of `G` and testing `X · g_r = 0` certifies `X = 0` with error probability at most `1 - d/m`. -/
 lemma matrix_zero_check
@@ -452,7 +595,11 @@ by
           _ = m - (k + 1) + 1 := rfl
       simpa [U, h_arith] using h_nonzero_ge
 
-/-- X is q-close to subspace V if there exists Y with columns in V and X−Y has ≤ q nonzero rows. -/
+/-! ## Proximity Definitions -/
+
+/-- Matrix X is q-close to subspace V if we can find Y with each column in V such that
+X and Y differ on at most q rows. This is the row-wise Hamming distance used in FRI:
+we're measuring how many evaluation points are "corrupted." -/
 @[simp] def qCloseToSubspace
   {α : Type*} [Semiring α] [DecidableEq α] [Zero α]
   {k n : ℕ} (V : Submodule α (Fin k → α)) (q : ℕ)
@@ -461,12 +608,15 @@ by
     (∀ j : Fin n, (fun i => Y i j) ∈ V) ∧
     (Finset.univ.filter (fun i : Fin k => ∃ j : Fin n, X i j ≠ Y i j)).card ≤ q
 
-/-- Subspace distance: the minimum Hamming weight among nonzero vectors in `V ≤ (Fin k → α)`. -/
+/-- Minimum Hamming weight of any nonzero vector in V. For Reed-Solomon codes,
+this equals n - deg + 1 by the Singleton bound. -/
 @[simp] noncomputable def subspaceDistance
     {α : Type*} [Semiring α] [DecidableEq α] [Zero α]
     {k : ℕ} (V : Submodule α (Fin k → α)) : ℕ :=
   sInf {w : ℕ | ∃ x : (Fin k → α), x ∈ V ∧ x ≠ 0 ∧
     (Finset.univ.filter (fun i : Fin k => x i ≠ 0)).card = w}
+
+/-! ## Measure Theory Utilities -/
 
 lemma measure_preimage_finset_le_sum_singletons
   {Ω β : Type*} [MeasurableSpace Ω]
@@ -536,11 +686,24 @@ lemma matrix_sparsity_check
       }
       ≤ ENNReal.ofReal ((q + 1 : ℝ) * (1 - (d : ℝ) / (m : ℝ))) :=
 by
-  set S := Finset.univ.filter fun i => ∃ j, X i j ≠ 0; by_cases hSle : S.card ≤ q; simp [hSle]
-  obtain ⟨T, hTsub, hTcard⟩ := Finset.exists_subset_card_eq (Nat.succ_le_of_lt (Nat.lt_of_not_ge hSle)); set y := fun ω => X.mulVec fun j => G (r ω) j
-  have hE : {ω | (Finset.univ.filter fun i => y ω i ≠ 0).card ≤ q ∧ ¬S.card ≤ q} ⊆ ⋃ i ∈ T, {ω | y ω i = 0} := fun ω ⟨hF, _⟩ => by by_contra hn; simp only [Set.mem_iUnion, Set.mem_setOf_eq, not_exists] at hn; exact (hTcard ▸ (Finset.card_le_card fun i hi => Finset.mem_filter.mpr ⟨Finset.mem_univ _, hn i hi⟩).trans hF).not_gt (Nat.lt_succ_self _)
-  calc μ _ ≤ ∑ i ∈ T, μ {ω | y ω i = 0} := (measure_mono hE).trans (measure_biUnion_finset_le T _)
-    _ ≤ ∑ _ ∈ T, ENNReal.ofReal (1 - (d : ℝ) / m) := Finset.sum_le_sum fun i hi => by obtain ⟨j0, hj0⟩ := (Finset.mem_filter.mp (hTsub hi)).2; have hx : (fun j => X i j) ≠ 0 := fun h => hj0 (congrFun h j0); simpa [Matrix.mulVec, dotProduct, mul_comm, y] using (show μ {ω | G.mulVec (fun j => X i j) (r ω) = 0} ≤ _ by simpa [hx] using zero_check G hG μ r h_unif (fun j => X i j))
+  set S := Finset.univ.filter fun i => ∃ j, X i j ≠ 0
+  by_cases hSle : S.card ≤ q; simp [hSle]
+  obtain ⟨T, hTsub, hTcard⟩ := Finset.exists_subset_card_eq (Nat.succ_le_of_lt (Nat.lt_of_not_ge hSle))
+  set y := fun ω => X.mulVec fun j => G (r ω) j
+  have hE : {ω | (Finset.univ.filter fun i => y ω i ≠ 0).card ≤ q ∧ ¬S.card ≤ q}
+      ⊆ ⋃ i ∈ T, {ω | y ω i = 0} := fun ω ⟨hF, _⟩ => by
+    by_contra hn
+    simp only [Set.mem_iUnion, Set.mem_setOf_eq, not_exists] at hn
+    exact (hTcard ▸ (Finset.card_le_card fun i hi =>
+      Finset.mem_filter.mpr ⟨Finset.mem_univ _, hn i hi⟩).trans hF).not_gt (Nat.lt_succ_self _)
+  calc μ _
+      ≤ ∑ i ∈ T, μ {ω | y ω i = 0} := (measure_mono hE).trans (measure_biUnion_finset_le T _)
+    _ ≤ ∑ _ ∈ T, ENNReal.ofReal (1 - (d : ℝ) / m) := Finset.sum_le_sum fun i hi => by
+        obtain ⟨j0, hj0⟩ := (Finset.mem_filter.mp (hTsub hi)).2
+        have hx : (fun j => X i j) ≠ 0 := fun h => hj0 (congrFun h j0)
+        simpa [Matrix.mulVec, dotProduct, mul_comm, y] using
+          (show μ {ω | G.mulVec (fun j => X i j) (r ω) = 0} ≤ _ by
+            simpa [hx] using zero_check G hG μ r h_unif (fun j => X i j))
     _ = _ := by rw [Finset.sum_const, hTcard, ← ENNReal.ofReal_nsmul, nsmul_eq_mul]; norm_cast
 
 lemma polynomial_zero_check
@@ -575,7 +738,10 @@ by
     measure_mono fun ω h => h.1
   simpa [hf, ENNReal.ofReal_div_of_pos hpos] using this.trans hμ_le
 
-/-- For `s ≤ z, s ≤ k`, the ratio of binomial coefficients equals the ratio of descending factorials (over `ℝ`). -/
+/-! ## Combinatorial Bounds -/
+
+/-- For `s ≤ z, s ≤ k`, the ratio of binomial coefficients equals the ratio of
+descending factorials (over `ℝ`). -/
 lemma choose_ratio_eq_descFactorial_ratio_real
   {z k s : ℕ} :
   ((Nat.choose z s : ℝ) / (Nat.choose k s : ℝ))
@@ -659,6 +825,8 @@ by
                  (pow_nonneg (by exact_mod_cast Nat.zero_le k) _)
     simpa [hnum0] using this
 
+/-! ## Mask Sampling Bounds -/
+
 lemma mask_zero_uniform_subset_bound
     {α : Type*} [DecidableEq α] [Zero α]
     {k : ℕ}
@@ -690,16 +858,32 @@ by
     convert_to (Finset.univ \ T).card = k - (q + 1)
     simp [Finset.card_sdiff, hTcard, Fintype.card_fin]
   have hμ_E_le_ratio : μ E ≤ (Nat.choose (k - (q + 1)) s : ENNReal) / Nat.choose k s := by
-    simpa [hUcard, c, nsmul_eq_mul, div_eq_mul_inv] using hμ_E_le_sum.trans (le_of_eq ((Finset.sum_congr rfl fun A hA => by simpa [c] using h_unif_S A (Finset.mem_powersetCard.1 hA).2).trans (Finset.sum_const c)))
+    simpa [hUcard, c, nsmul_eq_mul, div_eq_mul_inv] using hμ_E_le_sum.trans
+      (le_of_eq ((Finset.sum_congr rfl fun A hA => by
+        simpa [c] using h_unif_S A (Finset.mem_powersetCard.1 hA).2).trans (Finset.sum_const c)))
   by_cases hden0 : Nat.choose k s = 0
-  · exact (by simpa [Finset.card_eq_zero.1 (by simpa using Nat.choose_eq_zero_of_lt ((by simpa using Finset.card_le_univ U : U.card ≤ k).trans_lt (by by_contra hnk; exact ne_of_gt (Nat.choose_pos (le_of_not_gt hnk)) hden0)) : (U.powersetCard s).card = 0)] using hμ_E_le_sum : μ E ≤ 0).trans (by simp)
+  · have hU_pow_card : (U.powersetCard s).card = 0 := by
+      simpa using Nat.choose_eq_zero_of_lt
+        ((by simpa using Finset.card_le_univ U : U.card ≤ k).trans_lt
+          (by by_contra hnk; exact ne_of_gt (Nat.choose_pos (le_of_not_gt hnk)) hden0))
+    exact (by simpa [Finset.card_eq_zero.1 hU_pow_card] using hμ_E_le_sum : μ E ≤ 0).trans (by simp)
   by_cases hle : q + 1 ≤ k
   · have hkpos : 0 < k := lt_of_lt_of_le Nat.succ_pos' hle
-    have hpow_eq : ENNReal.ofReal (((k - (q + 1) : ℕ) : ℝ) ^ s / (k : ℝ) ^ s) = ENNReal.ofReal ((1 - (q + 1 : ℝ) / k) ^ s) := by
+    have hpow_eq : ENNReal.ofReal (((k - (q + 1) : ℕ) : ℝ) ^ s / (k : ℝ) ^ s)
+        = ENNReal.ofReal ((1 - (q + 1 : ℝ) / k) ^ s) := by
       simp [div_pow, one_sub_div (by exact_mod_cast hkpos.ne' : (k : ℝ) ≠ 0), Nat.cast_sub hle]
-    simpa [E] using hμ_E_le_ratio.trans ((by rw [ENNReal.ofReal_div_of_pos (by exact_mod_cast Nat.pos_of_ne_zero hden0)]; simp : ((Nat.choose (k - (q + 1)) s : ℕ) : ENNReal) / Nat.choose k s = ENNReal.ofReal ((Nat.choose (k - (q + 1)) s : ℝ) / Nat.choose k s)) ▸ (ENNReal.ofReal_le_ofReal (binomial_ratio_le_pow_real (Nat.sub_le _ _))).trans (hpow_eq ▸ le_rfl))
-  · by_cases hs0 : s = 0; · simpa [hs0] using (measure_mono fun _ _ => trivial : μ E ≤ μ Set.univ)
-    have hnum : Nat.choose (k - (q + 1)) s = 0 := by cases s with | zero => exact (hs0 rfl).elim | succ => simp [Nat.sub_eq_zero_of_le (lt_of_not_ge hle).le]
+    have hcast : ((Nat.choose (k - (q + 1)) s : ℕ) : ENNReal) / Nat.choose k s
+        = ENNReal.ofReal ((Nat.choose (k - (q + 1)) s : ℝ) / Nat.choose k s) := by
+      rw [ENNReal.ofReal_div_of_pos (by exact_mod_cast Nat.pos_of_ne_zero hden0)]; simp
+    simpa [E] using hμ_E_le_ratio.trans
+      (hcast ▸ (ENNReal.ofReal_le_ofReal (binomial_ratio_le_pow_real (Nat.sub_le _ _))).trans
+        (hpow_eq ▸ le_rfl))
+  · by_cases hs0 : s = 0
+    · simpa [hs0] using (measure_mono fun _ _ => trivial : μ E ≤ μ Set.univ)
+    have hnum : Nat.choose (k - (q + 1)) s = 0 := by
+      cases s with
+      | zero => exact (hs0 rfl).elim
+      | succ => simp [Nat.sub_eq_zero_of_le (lt_of_not_ge hle).le]
     exact (by simpa [hnum] using hμ_E_le_ratio : μ E ≤ 0).trans (by simp)
 
 /-- Masking by a finset: the masked vector is zero iff all masked coordinates are zero. -/
@@ -948,14 +1132,18 @@ by
   set yrow := fun i => Matrix.mulVec X fun t => G i t
   set T := fun i => Finset.univ.filter fun i' => Matrix.mulVec G' (yrow i) i' ≠ 0
   have hy i (hi : i ∈ S0) : yrow i ≠ 0 := fun h =>
-    (Finset.mem_filter.1 hi).2 <| by simpa [yrow, Matrix.mulVec, dotProduct, mul_comm] using congrArg (· i0) h
-  calc d * d' ≤ ∑ i ∈ S0, d' := by simp [Finset.sum_const]; exact Nat.mul_le_mul_right d' (by simpa using hG _ hi0)
-      _ ≤ ∑ i ∈ S0, (T i).card := Finset.sum_le_sum fun i hi => by simpa using hG' _ (hy i hi)
-      _ = ((S0.sigma T).map ⟨fun s => (s.2, s.1), fun a b h => by cases a; cases b; cases h; rfl⟩).card := by simp
-      _ ≤ _ := Finset.card_le_card fun _ hp => by
+    (Finset.mem_filter.1 hi).2 <| by
+      simpa [yrow, Matrix.mulVec, dotProduct, mul_comm] using congrArg (· i0) h
+  calc d * d'
+    _ ≤ ∑ i ∈ S0, d' := by
+        simp [Finset.sum_const]; exact Nat.mul_le_mul_right d' (by simpa using hG _ hi0)
+    _ ≤ ∑ i ∈ S0, (T i).card := Finset.sum_le_sum fun i hi => by simpa using hG' _ (hy i hi)
+    _ = ((S0.sigma T).map
+        ⟨fun s => (s.2, s.1), fun a b h => by cases a; cases b; cases h; rfl⟩).card := by simp
+    _ ≤ _ := Finset.card_le_card fun _ hp => by
         rcases Finset.mem_map.1 hp with ⟨⟨i, i'⟩, hi, rfl⟩
-        simpa [yrow, Matrix.mulVec, dotProduct] using (Finset.mem_filter.1 (Finset.mem_sigma.1 hi).2).2
-
+        simpa [yrow, Matrix.mulVec, dotProduct] using
+          (Finset.mem_filter.1 (Finset.mem_sigma.1 hi).2).2
 
 lemma kronecker_product_bound
   {α : Type*} [CommSemiring α] [DecidableEq α] [Zero α]
@@ -1140,6 +1328,8 @@ by
       zero_positions_card_le_of_distance (G' := G) (d' := d) (hG' := hG) (y := y) (hy := hy_ne)
   exact (not_le_of_gt hR) ((Finset.card_le_card hR_subset).trans hZ_le)
 
+/-! ## Subspace Distance Checks -/
+
 lemma subspace_distance_check_n2_deterministic_core
   {α : Type*} [Field α] [DecidableEq α]
   {m k : ℕ}
@@ -1192,43 +1382,67 @@ by
     intro t ht; rcases Finset.mem_filter.mp ht with ⟨htU, hne0⟩
     have hYval := congrArg (· t) hYv; have hLval := congrArg (· t) (hL_apply g)
     exact Finset.mem_filter.mpr ⟨htU, fun h => hne0 (by simp only [] at hYval hLval; simp [hLval, h, hYval])⟩
-  have h_e0_le_q : (Finset.univ.filter fun t => e0 t ≠ 0).card ≤ q := by simpa [e0] using h_e_le_q g0 v0 hY_g0 (by simpa [g0] using hv0q)
-  have h_e1_le_q : (Finset.univ.filter fun t => e1 t ≠ 0).card ≤ q := by simpa [e1] using h_e_le_q g1 v1 hY_g1 (by simpa [g1] using hv1q)
+  have h_e0_le_q : (Finset.univ.filter fun t => e0 t ≠ 0).card ≤ q := by
+    simpa [e0] using h_e_le_q g0 v0 hY_g0 (by simpa [g0] using hv0q)
+  have h_e1_le_q : (Finset.univ.filter fun t => e1 t ≠ 0).card ≤ q := by
+    simpa [e1] using h_e_le_q g1 v1 hY_g1 (by simpa [g1] using hv1q)
   have hL_two (g : Fin 2 → α) : L g = (B.repr g 0) • L (B 0) + (B.repr g 1) • L (B 1) := by
-    have := congrArg L ((B.sum_repr g).symm.trans (by simpa using Fin.sum_univ_two fun j => (B.repr g j) • B j))
+    have := congrArg L ((B.sum_repr g).symm.trans
+      (by simpa using Fin.sum_univ_two fun j => (B.repr g j) • B j))
     simpa [LinearMap.map_add, LinearMap.map_smul] using this
-  have hL_row_le_2q (i : Fin m) : (Finset.univ.filter fun t => L (fun j => G i j) t ≠ 0).card ≤ 2 * q := by
+  have hL_row_le_2q (i : Fin m) :
+      (Finset.univ.filter fun t => L (fun j => G i j) t ≠ 0).card ≤ 2 * q := by
     let gi : Fin 2 → α := fun j => G i j
-    have hcomb : L gi = (B.repr gi 0) • e0 + (B.repr gi 1) • e1 := by simpa [gi, e0, e1, g0, g1, hB0, hB1] using hL_two gi
-    have hsubset : (Finset.univ.filter fun t => L gi t ≠ 0) ⊆ (Finset.univ.filter fun t => e0 t ≠ 0 ∨ e1 t ≠ 0) := fun t ht => by
+    have hcomb : L gi = (B.repr gi 0) • e0 + (B.repr gi 1) • e1 := by
+      simpa [gi, e0, e1, g0, g1, hB0, hB1] using hL_two gi
+    have hsubset : (Finset.univ.filter fun t => L gi t ≠ 0)
+        ⊆ (Finset.univ.filter fun t => e0 t ≠ 0 ∨ e1 t ≠ 0) := fun t ht => by
       rcases Finset.mem_filter.mp ht with ⟨htU, hne0⟩
-      exact Finset.mem_filter.mpr ⟨htU, by by_contra h; push_neg at h; exact hne0 (by simpa [h.1, h.2] using congrArg (· t) hcomb)⟩
-    exact ((Finset.card_mono hsubset).trans (by simpa [Finset.filter_or] using Finset.card_union_le _ _)).trans (by simpa [two_mul] using add_le_add h_e0_le_q h_e1_le_q)
-  have unique_vector {w v1 v2 : Fin k → α} (hv1 : v1 ∈ V) (hv2 : v2 ∈ V) (hwv1 : (Finset.univ.filter fun t => w t ≠ v1 t).card ≤ 2 * q) (hwv2 : (Finset.univ.filter fun t => w t ≠ v2 t).card ≤ 2 * q) : v1 = v2 := by
-    by_contra hneq; let z : Fin k → α := fun t => v1 t - v2 t
+      exact Finset.mem_filter.mpr ⟨htU, by
+        by_contra h; push_neg at h; exact hne0 (by simpa [h.1, h.2] using congrArg (· t) hcomb)⟩
+    exact ((Finset.card_mono hsubset).trans
+      (by simpa [Finset.filter_or] using Finset.card_union_le _ _)).trans
+        (by simpa [two_mul] using add_le_add h_e0_le_q h_e1_le_q)
+  have unique_vector {w v1 v2 : Fin k → α} (hv1 : v1 ∈ V) (hv2 : v2 ∈ V)
+      (hwv1 : (Finset.univ.filter fun t => w t ≠ v1 t).card ≤ 2 * q)
+      (hwv2 : (Finset.univ.filter fun t => w t ≠ v2 t).card ≤ 2 * q) : v1 = v2 := by
+    by_contra hneq
+    let z : Fin k → α := fun t => v1 t - v2 t
     have hzV : z ∈ V := by simpa [z, Pi.sub_def] using V.sub_mem hv1 hv2
-    have hz_ne0 : z ≠ 0 := fun hz0 => hneq (funext fun t => by simpa [z, sub_eq_zero] using congrArg (· t) hz0)
+    have hz_ne0 : z ≠ 0 := fun hz0 =>
+      hneq (funext fun t => by simpa [z, sub_eq_zero] using congrArg (· t) hz0)
     let Sd : Finset (Fin k) := Finset.univ.filter fun t => z t ≠ 0
-    have hsubset_sd : Sd ⊆ (Finset.univ.filter fun t => w t ≠ v1 t) ∪ (Finset.univ.filter fun t => w t ≠ v2 t) := fun t ht => by
+    have hsubset_sd : Sd ⊆ (Finset.univ.filter fun t => w t ≠ v1 t)
+        ∪ (Finset.univ.filter fun t => w t ≠ v2 t) := fun t ht => by
       rcases Finset.mem_filter.mp ht with ⟨htU, hzne⟩
-      have : w t ≠ v1 t ∨ w t ≠ v2 t := by by_contra h; push_neg at h; exact hzne (by simp [z, h.1.symm, h.2.symm])
-      rcases this with h1 | h2 <;> [exact Finset.mem_union.mpr (Or.inl (Finset.mem_filter.mpr ⟨htU, h1⟩)); exact Finset.mem_union.mpr (Or.inr (Finset.mem_filter.mpr ⟨htU, h2⟩))]
-    have hSd_le : Sd.card ≤ 4 * q := ((Finset.card_mono hsubset_sd).trans (Finset.card_union_le _ _)).trans (by linarith)
+      have : w t ≠ v1 t ∨ w t ≠ v2 t := by
+        by_contra h; push_neg at h; exact hzne (by simp [z, h.1.symm, h.2.symm])
+      rcases this with h1 | h2
+      · exact Finset.mem_union.mpr (Or.inl (Finset.mem_filter.mpr ⟨htU, h1⟩))
+      · exact Finset.mem_union.mpr (Or.inr (Finset.mem_filter.mpr ⟨htU, h2⟩))
+    have hSd_le : Sd.card ≤ 4 * q :=
+      ((Finset.card_mono hsubset_sd).trans (Finset.card_union_le _ _)).trans (by linarith)
     have hdist_le : subspaceDistance V ≤ Sd.card := Nat.sInf_le ⟨z, hzV, hz_ne0, rfl⟩
     exact not_le_of_gt h_q (hdist_le.trans hSd_le)
   refine ⟨Y, hY_cols, fun i hiS => ?_⟩
   obtain ⟨vi, hviV, hviq⟩ := (hS i).mp hiS
-  let gi : Fin 2 → α := fun j => G i j; let w := Matrix.mulVec X gi
+  let gi : Fin 2 → α := fun j => G i j
+  let w := Matrix.mulVec X gi
   have hYgi_inV : Matrix.mulVec Y gi ∈ V := by simpa [hY_mulVec] using hT_memV gi
   have hY_le_2q : (Finset.univ.filter fun t => w t ≠ Matrix.mulVec Y gi t).card ≤ 2 * q := by
-    have hsubset : (Finset.univ.filter fun t => w t ≠ Matrix.mulVec Y gi t) ⊆ (Finset.univ.filter fun t => L gi t ≠ 0) := fun t ht => by
+    have hsubset : (Finset.univ.filter fun t => w t ≠ Matrix.mulVec Y gi t)
+        ⊆ (Finset.univ.filter fun t => L gi t ≠ 0) := fun t ht => by
       rcases Finset.mem_filter.mp ht with ⟨htU, hneq⟩
-      exact Finset.mem_filter.mpr ⟨htU, fun h0 => hneq (sub_eq_zero.mp (by simpa [h0, w, gi] using (congrArg (· t) (hL_apply gi)).symm))⟩
+      exact Finset.mem_filter.mpr ⟨htU, fun h0 =>
+        hneq (sub_eq_zero.mp (by simpa [h0, w, gi] using (congrArg (· t) (hL_apply gi)).symm))⟩
     exact (Finset.card_mono hsubset).trans (hL_row_le_2q i)
-  have h_eq : vi = Matrix.mulVec Y gi := unique_vector hviV hYgi_inV (hviq.trans (by simp [two_mul])) hY_le_2q
-  have hsubset2 : (Finset.univ.filter fun t => Matrix.mulVec (X - Y) gi t ≠ 0) ⊆ (Finset.univ.filter fun t => Matrix.mulVec X gi t ≠ Matrix.mulVec Y gi t) := fun t ht => by
+  have h_eq : vi = Matrix.mulVec Y gi :=
+    unique_vector hviV hYgi_inV (hviq.trans (by simp [two_mul])) hY_le_2q
+  have hsubset2 : (Finset.univ.filter fun t => Matrix.mulVec (X - Y) gi t ≠ 0)
+      ⊆ (Finset.univ.filter fun t => Matrix.mulVec X gi t ≠ Matrix.mulVec Y gi t) := fun t ht => by
     rcases Finset.mem_filter.mp ht with ⟨htU, hneq0⟩
-    exact Finset.mem_filter.mpr ⟨htU, fun h => hneq0 (by simp [congrArg (· t) (Matrix.sub_mulVec (A := X) (B := Y) (x := gi)), h])⟩
+    exact Finset.mem_filter.mpr ⟨htU, fun h =>
+      hneq0 (by simp [congrArg (· t) (Matrix.sub_mulVec (A := X) (B := Y) (x := gi)), h])⟩
   simpa [gi] using (Finset.card_mono hsubset2).trans (by simpa [w, h_eq] using hviq)
 
 lemma subspace_distance_check_n2_main_reduction
@@ -1327,22 +1541,31 @@ lemma basis_alignment_diagonal
   ∀ a b : α, ∃ v ∈ V',
     (Finset.univ.filter
       (fun i : Fin k => (a * X i 0 + b * X i 1) ≠ v i)).card ≤ q :=
-by intro a b; obtain ⟨Y, hcols, hcard⟩ := hclose; exact ⟨_, V'.add_mem (V'.smul_mem a (hcols 0)) (V'.smul_mem b (hcols 1)), (Finset.card_le_card fun i hi => by simp at hi ⊢; exact if h : X i 0 = Y i 0 then Or.inr (fun heq => hi (by simp [h, heq])) else Or.inl h).trans hcard⟩
+by
+  intro a b
+  obtain ⟨Y, hcols, hcard⟩ := hclose
+  exact ⟨_, V'.add_mem (V'.smul_mem a (hcols 0)) (V'.smul_mem b (hcols 1)),
+    (Finset.card_le_card fun i hi => by
+      simp at hi ⊢
+      exact if h : X i 0 = Y i 0
+        then Or.inr (fun heq => hi (by simp [h, heq]))
+        else Or.inl h).trans hcard⟩
 
-/-- FRI Basis Alignment: with `T1 = [I; I]` and `T2 = [D; −D]` (for a diagonal `D : Fin m → α`), if `X = [x₁ x₂] : Matrix (Fin m) (Fin 2) α` is `q`-close to `V'`, then `T1 x₁ + T2 x₂` is within Hamming distance ≤ `2q` of the larger space `V` (as a vector in `α^{2m}`). -/
+/-! ## FRI Basis Alignment -/
+
+/-- If X = [x₁ x₂] is q-close to V', then the "unfolded" combination T₁x₁ + T₂x₂
+(which reconstructs the original function from its even/odd parts) is 2q-close to V.
+The factor of 2 comes from each bad row of X contributing to at most 2 bad positions
+in the 2m-dimensional unfolded vector. -/
 lemma fri_basis_alignment
   {α : Type*} [Ring α] [DecidableEq α]
   {m : ℕ}
   (V : Submodule α (Fin (m + m) → α))
   (V' : Submodule α (Fin m → α))
   (D : Fin m → α)
+  (hstruct : FRISubspaceStructure m V V' D)
   (X : Matrix (Fin m) (Fin 2) α)
   (q : ℕ)
-  (hT1 : ∀ y ∈ V',
-    (fun i : Fin (m + m) => Fin.addCases y y i) ∈ V)
-  (hT2 : ∀ y ∈ V',
-    (fun i : Fin (m + m) =>
-      Fin.addCases (fun j => D j * y j) (fun j => - D j * y j) i) ∈ V)
   (hclose : qCloseToSubspace V' q X) :
   ∃ v ∈ V,
     (Finset.univ.filter (fun i : Fin (m + m) =>
@@ -1352,10 +1575,14 @@ lemma fri_basis_alignment
 by
   obtain ⟨Y, hcols, hS_le⟩ := hclose
   set S := Finset.univ.filter fun j => ∃ t : Fin 2, X j t ≠ Y j t
-  set y0 := fun j => Y j 0; set y1 := fun j => Y j 1
-  set v : Fin (m + m) → α := fun i => Fin.addCases y0 y0 i + Fin.addCases (fun j => D j * y1 j) (fun j => - D j * y1 j) i
-  set Top := fun j => X j 0 + D j * X j 1; set Bot := fun j => X j 0 - D j * X j 1
-  have hsubset : (Finset.univ.filter fun i => Fin.addCases Top Bot i ≠ v i) ⊆ S.image (Fin.castAdd m) ∪ S.image (Fin.addNat · m) := fun i hi => by
+  set y0 := fun j => Y j 0
+  set y1 := fun j => Y j 1
+  set v : Fin (m + m) → α := fun i =>
+    Fin.addCases y0 y0 i + Fin.addCases (fun j => D j * y1 j) (fun j => - D j * y1 j) i
+  set Top := fun j => X j 0 + D j * X j 1
+  set Bot := fun j => X j 0 - D j * X j 1
+  have hsubset : (Finset.univ.filter fun i => Fin.addCases Top Bot i ≠ v i)
+      ⊆ S.image (Fin.castAdd m) ∪ S.image (Fin.addNat · m) := fun i hi => by
     have hagree : ∀ j ∉ S, ∀ t, X j t = Y j t := fun j hj t => by
       by_contra h
       simp only [S, Finset.mem_filter, Finset.mem_univ, true_and, not_exists] at hj
@@ -1368,31 +1595,35 @@ by
       · exact Finset.mem_union.2 (Or.inl (hij ▸ Finset.mem_image.mpr ⟨j, hjS, rfl⟩))
       · simp only [by simpa [hij] using Fin.addCases_left (m := m) (n := m) (motive := fun _ => α) (left := Top) (right := Bot) j, by simpa [hij] using (by simp [v] : v (Fin.castAdd m j) = y0 j + D j * y1 j), Top, y0, y1, hagree j hjS, ne_eq, not_true_eq_false] at hneq
     · let j : Fin m := ⟨i - m, Nat.sub_lt_left_of_lt_add (Nat.le_of_not_lt hlt) i.2⟩
-      have hij : (j.addNat m : Fin (m + m)) = i := by simpa [Fin.ext_iff, Nat.add_comm] using Nat.add_sub_of_le (Nat.le_of_not_lt hlt)
+      have hij : (j.addNat m : Fin (m + m)) = i := by
+        simpa [Fin.ext_iff, Nat.add_comm] using Nat.add_sub_of_le (Nat.le_of_not_lt hlt)
       by_cases hjS : j ∈ S
       · exact Finset.mem_union.2 (Or.inr (hij ▸ Finset.mem_image.mpr ⟨j, hjS, rfl⟩))
-      · have h2 : v i = y0 j - D j * y1 j := by simp [v, sub_eq_add_neg, by simpa [hij] using Fin.addCases_right (m := m) (n := m) (motive := fun _ => α) (left := y0) (right := y0) j, by simpa [hij] using Fin.addCases_right (m := m) (n := m) (motive := fun _ => α) (left := fun t => D t * y1 t) (right := fun t => - (D t * y1 t)) j]
+      · have h2 : v i = y0 j - D j * y1 j := by
+          simp [v, sub_eq_add_neg, by simpa [hij] using Fin.addCases_right (m := m) (n := m) (motive := fun _ => α) (left := y0) (right := y0) j, by simpa [hij] using Fin.addCases_right (m := m) (n := m) (motive := fun _ => α) (left := fun t => D t * y1 t) (right := fun t => - (D t * y1 t)) j]
         simp only [by simpa [hij] using Fin.addCases_right (m := m) (n := m) (motive := fun _ => α) (left := Top) (right := Bot) j, h2, Bot, y0, y1, hagree j hjS, ne_eq, not_true_eq_false] at hneq
-  refine ⟨v, by simpa [v] using V.add_mem (hT1 y0 (by simpa using hcols 0)) (hT2 y1 (by simpa using hcols 1)), ?_⟩
-  exact ((Finset.card_le_card hsubset).trans (Finset.card_union_le _ _)).trans (by rw [Finset.card_image_of_injective _ (Fin.castAdd_injective _ _), Finset.card_image_of_injOn fun x _ y _ h => (Fin.addNat_inj (n := m) (m := m)).1 h]; omega)
+  refine ⟨v, by simpa [v] using V.add_mem (hstruct.T1 y0 (by simpa using hcols 0)) (hstruct.T2 y1 (by simpa using hcols 1)), ?_⟩
+  exact ((Finset.card_le_card hsubset).trans (Finset.card_union_le _ _)).trans
+    (by rw [Finset.card_image_of_injective _ (Fin.castAdd_injective _ _),
+            Finset.card_image_of_injOn fun x _ y _ h => (Fin.addNat_inj (n := m) (m := m)).1 h]
+        omega)
 
-/- FRI Reduction Step: union-of-failure-events; rows(G)=m as in the blueprint; includes `y` and assumes `S` is a uniformly random s-subset of `{0,…,2m-1}`. -/
+/-- FRI Reduction Step: union-of-failure-events; rows(G)=m as in the blueprint; includes `y`
+and assumes `S` is a uniformly random s-subset of `{0,…,2m-1}`.
+
+Uses `FRISubspaceStructure` for T1/T2 and `UniformFin` for uniform distribution. -/
 lemma fri_reduction_step
   {α : Type*} [Field α] [DecidableEq α]
   {m : ℕ}
   (V : Submodule α (Fin (m + m) → α))
   (V' : Submodule α (Fin m → α))
   (D : Fin m → α)
-  (hT1 : ∀ y ∈ V',
-    (fun i : Fin (m + m) => Fin.addCases y y i) ∈ V)
-  (hT2 : ∀ y ∈ V',
-    (fun i : Fin (m + m) =>
-      Fin.addCases (fun j => D j * y j) (fun j => - D j * y j) i) ∈ V)
+  (hstruct : FRISubspaceStructure m V V' D)
   (G : Matrix (Fin m) (Fin 2) α) {d : ℕ}
   (hG : codeHasDistanceAtLeast G d)
   {Ω : Type*} [MeasurableSpace Ω]
   (μ : Measure Ω) [IsProbabilityMeasure μ]
-  (r : Ω → Fin m) (h_unif : ∀ i : Fin m, μ {ω | r ω = i} = (1 : ENNReal) / (m : ENNReal))
+  (r : Ω → Fin m) (h_r : UniformFin μ m r)
   (X : Matrix (Fin m) (Fin 2) α)
   (y : Fin (m + m) → α)
   (q : ℕ)
@@ -1421,34 +1652,22 @@ by
   let xmask := fun i => y i - t i
   have h_sub : {ω : Ω | (∀ i ∈ S ω, y i = t i) ∧ ¬∃ v ∈ V, (Finset.univ.filter fun i : Fin (m + m) => y i ≠ v i).card ≤ 3 * q} ⊆
       {ω | (∀ i ∈ S ω, xmask i = 0) ∧ ¬(Finset.univ.filter fun i : Fin (m + m) => xmask i ≠ 0).card ≤ q} := fun ω ⟨hall, hnot⟩ => by
-    obtain ⟨v0, hv0V, hv0_le⟩ := fri_basis_alignment V V' D X q hT1 hT2 h_close
+    obtain ⟨v0, hv0V, hv0_le⟩ := fri_basis_alignment V V' D hstruct X q h_close
     refine ⟨fun i hi => by simp [xmask, hall i hi], fun hB => hnot ⟨v0, hv0V, ?_⟩⟩
     have := ((Finset.card_le_card (s := Finset.univ.filter fun i => y i ≠ v0 i) fun i hi => by
         rcases Finset.mem_filter.1 hi with ⟨_, hy⟩; by_cases hx : xmask i = 0 <;>
         [exact Finset.mem_union.2 <| .inr <| Finset.mem_filter.2 ⟨by simp, by simpa [sub_eq_zero.mp hx] using hy⟩;
          exact Finset.mem_union.2 <| .inl <| Finset.mem_filter.2 ⟨by simp, hx⟩]).trans (Finset.card_union_le _ _)).trans (add_le_add hB hv0_le)
     simp only [Nat.succ_mul, add_comm] at this ⊢; omega
-  refine (measure_union_le _ _).trans (add_le_add (subspace_distance_check_n2 V' G hG μ r h_unif X q h_q)
+  refine (measure_union_le _ _).trans (add_le_add (subspace_distance_check_n2 V' G hG μ r h_r.uniform X q h_q)
     ((measure_mono h_sub).trans (by simpa [two_mul] using mask_zero_uniform_subset_bound μ S s h_card (fun A hA => by simpa [two_mul] using hS_unif A hA) xmask q)))
 
-/-- The "Bad Event" for round `i`: the verifier ACCEPTS but data is BAD.
+/-! ## FRI Security Definitions and Theorems -/
 
-This is the correct formulation for soundness: we require BOTH checks to pass
-(so the verifier accepts this round), AND the data is bad (X not close OR y not close).
-
-The conjunction-based structure allows proving bounds WITHOUT assuming closeness:
-- If X is close: the sampling check catches bad y (via fri_basis_alignment)
-- If X is NOT close: Pr[folding passes] ≤ (q+1)(1-d/m), bounding the whole event
-
-FRI Structure at round i (matching fri_reduction_step):
-- m := folded dimension
-- V: subspace of Fin (m + m) → α (current round)
-- V': subspace of Fin m → α (folded)
-- G: code matrix with m rows, 2 columns
-- X: matrix m × 2 (the two columns being folded)
-- D: Fin m → α (diagonal folding coefficients)
-- y: Fin (m + m) → α (the current round's oracle, via Fin.addCases)
-- S: random subset of Fin (m + m) for sampling check -/
+/-- Bad event for round i: the verifier accepts (both folding and sampling checks pass)
+but the prover's data is actually bad—either X is not q-close to V', or the oracle y
+disagrees with the expected folding on more than q positions. This is the event we
+need to bound for soundness. -/
 def friRoundBadEvent
   {α : Type*} [Field α] [DecidableEq α]
   {Ω : Type*}
@@ -1480,46 +1699,40 @@ def friRoundBadEvent
        ¬ (∃ v ∈ V, (Finset.univ.filter (fun t : Fin (m + m) => y t ≠ v t)).card ≤ 3 * q))
   }
 
-/-- Round-wise Error: bounds the bad event for round i of FRI.
-From blueprint lem:round_wise_error: "Direct from Lemma fri_reduction_step with substituted parameters."
+/-! ## Round-Wise Error Bound -/
 
-With the conjunction-based friRoundBadEvent, this bound holds WITHOUT assuming closeness:
-- If X is close to V': the "X not close" part of bad is false, so we only need to
-  bound Pr[sampling passes ∧ y not close], which uses fri_basis_alignment + masking
-- If X is NOT close: Pr[folding passes] ≤ (q+1)(1-d/m) by subspace_distance_check_n2,
-  which bounds the entire event since both checks must pass -/
+/-- Per-round error bound (lem:round_wise_error). The proof splits into two cases:
+if X is far from V', the random folding challenge likely produces a non-codeword;
+if X is close but y is inconsistent, random sampling likely catches a disagreement.
+Either way, the bad event has probability at most (q+1)(1-d/m) + (1-(q+1)/2m)^s. -/
 lemma round_wise_error
   {α : Type*} [Field α] [DecidableEq α]
   {m : ℕ}
   (V : Submodule α (Fin (m + m) → α))
   (V' : Submodule α (Fin m → α))
   (D : Fin m → α)
-  -- FRI structural hypotheses (T1 and T2 from def:fri_subspace_structure)
-  (hT1 : ∀ y ∈ V', (fun j : Fin (m + m) => Fin.addCases y y j) ∈ V)
-  (hT2 : ∀ y ∈ V', (fun j : Fin (m + m) =>
-      Fin.addCases (fun k => D k * y k) (fun k => - D k * y k) j) ∈ V)
+  (hstruct : FRISubspaceStructure m V V' D)
   (G : Matrix (Fin m) (Fin 2) α) {d : ℕ}
   (hG : codeHasDistanceAtLeast G d)
   {Ω : Type*} [MeasurableSpace Ω]
   (μ : Measure Ω) [IsProbabilityMeasure μ]
-  (r : Ω → Fin m) (h_unif : ∀ j : Fin m, μ {ω | r ω = j} = (1 : ENNReal) / (m : ENNReal))
+  (r : Ω → Fin m) (h_r : UniformFin μ m r)
   (X : Matrix (Fin m) (Fin 2) α)
   (y : Fin (m + m) → α)
-  (q : ℕ)
-  (h_q : 4 * q < subspaceDistance V')
-  (s : ℕ)
-  (S : Ω → Finset (Fin (m + m)))
+  (q : ℕ) (h_q : 4 * q < subspaceDistance V')
+  (s : ℕ) (S : Ω → Finset (Fin (m + m)))
   (h_card : ∀ ω, (S ω).card = s)
   (hS_unif : ∀ A : Finset (Fin (m + m)), A.card = s →
       μ {ω | S ω = A} = (1 : ENNReal) / ((Nat.choose (2 * m) s : ℕ) : ENNReal)) :
   μ (friRoundBadEvent m V V' G r X D y q S)
     ≤ ENNReal.ofReal ((q + 1 : ℝ) * (1 - (d : ℝ) / (m : ℝ))) +
       ENNReal.ofReal ((1 - ((q + 1 : ℝ) / ((2 * m) : ℝ))) ^ s) :=
-by by_cases h : qCloseToSubspace V' q X <;>
-  [exact (measure_mono <| by rintro _ ⟨-, s, b⟩; exact b.elim (absurd h) (.inr ⟨s, ·⟩)).trans
-    (fri_reduction_step V V' D hT1 hT2 G hG μ r h_unif X y q h_q h S _ h_card hS_unif);
-   exact (measure_mono <| by rintro _ ⟨f, -⟩; exact ⟨f, h⟩).trans
-    ((subspace_distance_check_n2 V' G hG μ r h_unif X q h_q).trans le_self_add)]
+by
+  by_cases h : qCloseToSubspace V' q X
+  · exact (measure_mono <| by rintro _ ⟨-, s, b⟩; exact b.elim (absurd h) (.inr ⟨s, ·⟩)).trans
+      (fri_reduction_step V V' D hstruct G hG μ r h_r X y q h_q h S _ h_card hS_unif)
+  · exact (measure_mono <| by rintro _ ⟨f, -⟩; exact ⟨f, h⟩).trans
+      ((subspace_distance_check_n2 V' G hG μ r h_r.uniform X q h_q).trans le_self_add)
 
 lemma nat_div_ratio_lower_bound_two_thirds_pow (q n i : ℕ)
   (h_den_pos : 0 < n / 2 ^ i) :
@@ -1530,11 +1743,14 @@ by
   have hA : (q:ℝ)/3^i ≤ ↑(q/3^i)+1 := by
     have := Nat.div_add_mod' q (3^i); have := Nat.mod_lt q (pow_pos (by omega:0<3) i)
     rw [div_le_iff₀ (by positivity), add_mul, one_mul]; exact_mod_cast by omega
-  have hC : (2:ℝ)^i/n*↑(n/2^i)≤1 := by
-    have h := (le_div_iff₀ (by positivity:(0:ℝ)<2^i)).2 (by exact_mod_cast Nat.div_mul_le_self n (2^i):↑(n/2^i)*(2:ℝ)^i≤n)
+  have hC : (2 : ℝ)^i / n * ↑(n / 2^i) ≤ 1 := by
+    have h := (le_div_iff₀ (by positivity : (0 : ℝ) < 2^i)).2
+      (by exact_mod_cast Nat.div_mul_le_self n (2^i) : ↑(n / 2^i) * (2 : ℝ)^i ≤ n)
     simpa [one_div, hB.ne'] using mul_le_mul_of_nonneg_right (one_div_le_one_div_of_le hB h) hB.le
   rw [ge_iff_le, le_div_iff₀ hB]
-  linarith [(by simp [div_pow]; ring:(q:ℝ)/n*(2/3)^i*↑(n/2^i)=(q:ℝ)/3^i*((2:ℝ)^i/n*↑(n/2^i))).le.trans (mul_le_of_le_one_right (by positivity) hC)]
+  have hrw : (q : ℝ) / n * (2/3)^i * ↑(n / 2^i) = (q : ℝ) / 3^i * ((2 : ℝ)^i / n * ↑(n / 2^i)) := by
+    simp [div_pow]; ring
+  linarith [hrw.le.trans (mul_le_of_le_one_right (by positivity) hC)]
 
 lemma sum_nat_div_pow3_add_one_le (k q : ℕ) :
   (Finset.sum (Finset.range k) (fun i => ((q / 3 ^ i : ℕ) : ℝ) + 1))
@@ -1547,7 +1763,11 @@ by
     _ ≤ _ := by nlinarith [hg, Nat.cast_nonneg (α := ℝ) q]
 
 
-/-- Geometric Summation: suppose for each `i = 0,…,k−1` we have a per-round failure probability `p i` bounded by the round-wise expression with `qᵢ = q / 3^i`, `nᵢ = n / 2^i`, and sample sizes `s i = η · (3/2)^i`. Then the total failure probability `∑_{i=0}^{k-1} p i` is at most `((3/2)·q + k)·(1 - d/m) + k · exp(−η·q/n)`. -/
+/-! ## Geometric Bounds -/
+
+/-- Sums per-round error probabilities over k rounds. The geometric series from q/3^i
+telescopes to roughly (3/2)q, and the exponential sampling terms sum to k·exp(−ηq/n).
+This is the key calculation that turns round-by-round bounds into the final ε. -/
 lemma geometric_summation (k η q d m n : ℕ)
   (s : ℕ → ℕ) (hs : ∀ i < k, (s i : ℝ) = η * ((3 : ℝ) / 2) ^ i)
   (p : ℕ → ℝ)
@@ -1575,10 +1795,15 @@ by
         calc η * ((3 : ℝ) / 2) ^ i * lam ≥ η * ((3 : ℝ) / 2) ^ i * (q / n * (2 / 3) ^ i) := h1
           _ = η * q / n * (((3 : ℝ) / 2) ^ i * (2 / 3) ^ i) := by ring
           _ = η * q / n := by rw [hpow]; ring
-      exact (pow_le_pow_left₀ (by linarith) (Real.one_sub_le_exp_neg _) _).trans (by rw [← Real.exp_nat_mul]; simpa [mul_comm, mul_assoc, div_eq_mul_inv] using Real.exp_le_exp.mpr (neg_le_neg hEq))
+      exact (pow_le_pow_left₀ (by linarith) (Real.one_sub_le_exp_neg _) _).trans
+        (by rw [← Real.exp_nat_mul]
+            simpa [mul_comm, mul_assoc, div_eq_mul_inv] using Real.exp_le_exp.mpr (neg_le_neg hEq))
     simpa [Finset.sum_const, nsmul_eq_mul] using Finset.sum_le_sum h
-  have h1 : ∑ i ∈ Finset.range k, p i ≤ c * ∑ i ∈ Finset.range k, (((q / 3 ^ i : ℕ) : ℝ) + 1) + ∑ i ∈ Finset.range k, (1 - (((q / 3 ^ i : ℕ) + 1 : ℝ) / ((n / 2 ^ i : ℕ) : ℝ))) ^ (s i) := by
-    convert Finset.sum_le_sum fun i hi => h_pi i (Finset.mem_range.mp hi) using 1; simp [Finset.sum_add_distrib, mul_comm c, ← Finset.sum_mul]
+  have h1 : ∑ i ∈ Finset.range k, p i
+      ≤ c * ∑ i ∈ Finset.range k, (((q / 3 ^ i : ℕ) : ℝ) + 1)
+        + ∑ i ∈ Finset.range k, (1 - (((q / 3 ^ i : ℕ) + 1 : ℝ) / ((n / 2 ^ i : ℕ) : ℝ))) ^ (s i) := by
+    convert Finset.sum_le_sum fun i hi => h_pi i (Finset.mem_range.mp hi) using 1
+    simp [Finset.sum_add_distrib, mul_comm c, ← Finset.sum_mul]
   linarith [mul_le_mul_of_nonneg_left (sum_nat_div_pow3_add_one_le k q) hc]
 
 lemma one_sub_pow_le_exp_neg_of_mul_ge
@@ -1632,7 +1857,7 @@ by
         (by simpa [div_eq_mul_inv, mul_comm, mul_left_comm, mul_assoc] using sum_one_sub_pow_le_exp_neg_const 28 s lam _ h_mul_ge)
     _ = _ := by simp [c, mul_comm]
 
-/-- Query Count: if `|Sᵢ| = η · (3/2)^i` for i = 1,…,k, then the total number of queries is `∑_{i=1}^k |Sᵢ| = 2·η·((3/2)^{k+1} - 1)`. -/
+/-- Query Count: if `|Sᵢ| = η · (3/2)^i` for i = 1,…,k, then the total number of queries is `∑_{i=1}^k |Sᵢ| = 2·η·((3/2)^k - 1)`. -/
 lemma query_count (k : ℕ) (η : ℝ) :
   (Finset.sum (Finset.range k) (fun i => η * ((3 : ℝ) / 2) ^ i))
     = 2 * η * (((3 : ℝ) / 2) ^ k - 1) :=
@@ -1689,228 +1914,182 @@ by
       linarith [union_bound T, mul_lt_mul_of_pos_right hT_lt (sub_pos.mpr hi1)]
     _ = ∑ t ∈ Finset.univ, (1 - a t) := sum_split.symm
 
-/-- FRI Protocol Security (thm:fri_security_complete in blueprint):
-The union of all k rounds' bad events has probability at most
-`ε = ((3/2)·q + k)/|F| + k·exp(−η·q/n)`.
+/-- Main FRI soundness theorem (thm:fri_security_complete in blueprint).
 
-This is the main FRI soundness theorem: if the prover is cheating (some Xᵢ not close to V'ᵢ),
-the verifier catches them with high probability.
+If a prover is cheating (i.e., some X_i is not close to V'_i), the verifier catches them
+except with probability at most:
 
-FRI Structure at round i (from def:fri_subspace_structure):
-- n := 2 * m_seq 0 is the initial dimension
-- m_seq i := folded dimension at round i, satisfying m_seq i * 2^i = m_seq 0 (halving schedule)
-- V_seq i: subspace of Fin (2 * m_seq i) → α (current round's codewords)
-- V'_seq i: subspace of Fin (m_seq i) → α (folded codewords)
-- X_seq i: the prover's matrix (m_seq i) × 2, being folded
-- D_seq i: diagonal folding coefficients
-- y_seq i: the prover's claimed next-round oracle
+  ε ≤ ((3/2)·q + k) · (1 - d/m) + k · exp(−η·q/n)
 
-Per-round parameters (from lem:round_wise_error and lem:geometric_summation):
-- q / 3^i: proximity parameter at round i (geometric decay)
-- s i = η * (3/2)^i: sample size at round i (geometric growth)
-- 2 * m_seq i = n / 2^i: ambient dimension at round i (halving)
-
-The key hypotheses are:
-1. h_m_seq: dimension halving schedule m_seq i * 2^i = m_seq 0
-2. hT1, hT2: FRI subspace structure (V = T₁V' ⊕ T₂V' from def:fri_subspace_structure)
-3. h_subspace_dist: 4 * (q / 3^i) < subspaceDistance(V'ᵢ) for unique decoding at round i
-4. hG: Code has sufficient distance for folding checks
-5. hs: Sample sizes follow the geometric growth schedule
-6. Uniformity of random challenges and samples -/
+The first term comes from the folding check (random linear combination hitting a low-weight
+codeword), the second from sampling (missing all disagreements). Parameters evolve
+geometrically: proximity q/3^i, samples η·(3/2)^i, dimension m/2^i. -/
 theorem fri_security_complete
   {α : Type*} [Field α] [DecidableEq α]
   -- Basic parameters
-  (k η q : ℕ)
-  -- Probability space
-  {Ω : Type*} [MeasurableSpace Ω] (μ : Measure Ω) [IsProbabilityMeasure μ]
-  -- m_seq i is the folded dimension at round i
-  -- n = 2 * m_seq 0 is the initial dimension
-  (m_seq : ℕ → ℕ)
-  (hm0_pos : 0 < m_seq 0)
-  -- FRI dimension schedule: dimension halves each round (m_seq i = m_seq 0 / 2^i)
-  (h_m_seq : ∀ i < k, m_seq i * 2^i = m_seq 0)
+  {k : ℕ} {m_seq : ℕ → ℕ}
+  -- Dimension schedule (bundled)
+  (hdim : FRIDimensionSchedule k m_seq)
   -- FRI subspace sequences
   (V_seq  : ∀ i : ℕ, Submodule α (Fin (m_seq i + m_seq i) → α))
   (V'_seq : ∀ i : ℕ, Submodule α (Fin (m_seq i) → α))
-  -- Diagonal folding coefficients (from def:fri_subspace_structure)
+  -- Diagonal folding coefficients
   (D_seq : ∀ i : ℕ, Fin (m_seq i) → α)
-  -- FRI structural hypotheses: V = T₁V' ⊕ T₂V' where T₁ = [I; I], T₂ = [D; -D]
-  (hT1 : ∀ i < k, ∀ y ∈ V'_seq i,
-      (fun j : Fin (m_seq i + m_seq i) => Fin.addCases y y j) ∈ V_seq i)
-  (hT2 : ∀ i < k, ∀ y ∈ V'_seq i,
-      (fun j : Fin (m_seq i + m_seq i) =>
-        Fin.addCases (fun t => (D_seq i) t * y t) (fun t => - (D_seq i) t * y t) j) ∈ V_seq i)
-  -- Subspace distance condition: 4 * q_i < d'(V'ᵢ) for unique decoding at round i
-  -- where q_i = q / 3^i is the per-round proximity parameter
-  (h_subspace_dist : ∀ i < k, 4 * (q / 3^i) < subspaceDistance (V'_seq i))
-  -- Prover's matrices and oracles (what we're checking)
-  -- NO closeness assumption needed! With the conjunction-based friRoundBadEvent,
-  -- round_wise_error bounds the bad event unconditionally.
-  (X_seq : ∀ i : ℕ, Matrix (Fin (m_seq i)) (Fin 2) α)
-  (y_seq : ∀ i : ℕ, Fin (m_seq i + m_seq i) → α)
-  -- Code matrices for folding checks (one per round due to dimension changes)
+  -- FRI structural hypotheses (bundled per round)
+  (hstruct : ∀ i < k, FRISubspaceStructure (m_seq i) (V_seq i) (V'_seq i) (D_seq i))
+  -- Sampling parameters (bundled)
+  (params : FRISamplingParams k m_seq)
+  -- Subspace distance condition: 4 * q_i < d'(V'ᵢ) for unique decoding
+  (h_subspace_dist : ∀ i < k, 4 * (params.q / 3^i) < subspaceDistance (V'_seq i))
+  -- Prover's data (bundled)
+  (prover : FRIProverData (α := α) m_seq)
+  -- Code matrices for folding checks
   (G_seq : ∀ i : ℕ, Matrix (Fin (m_seq i)) (Fin 2) α)
-  (d : ℕ) -- Code distance (same for all rounds)
-  (hd_le_m : d ≤ m_seq 0) -- Code distance bounded by initial dimension
+  (d : ℕ)
+  (hd_le_m : d ≤ m_seq 0)
   (hG : ∀ i < k, codeHasDistanceAtLeast (G_seq i) d)
-  -- Random challenge selectors
+  -- Probability space and verifier randomness
+  {Ω : Type*} [MeasurableSpace Ω] (μ : Measure Ω) [IsProbabilityMeasure μ]
   (r_seq : ∀ i : ℕ, Ω → Fin (m_seq i))
-  (h_r_unif : ∀ i < k, ∀ j : Fin (m_seq i),
-      μ {ω | r_seq i ω = j} = (1 : ENNReal) / (m_seq i : ENNReal))
-  -- Sample sets for proximity checks
-  -- Sample sizes follow the geometric growth: s i = η * (3/2)^i
-  (s : ℕ → ℕ)
-  (hs : ∀ i < k, (s i : ℝ) = (η : ℝ) * ((3 : ℝ) / 2) ^ i)
-  -- Lambda condition: per-round proximity parameter bounded by dimension
-  -- (q / 3^i + 1) ≤ (n / 2^i) where n = 2 * m_seq 0
-  (h_lambda_le_one : ∀ i < k, (((q / 3^i : ℕ) + 1 : ℝ) ≤ ((2 * m_seq 0 / 2^i : ℕ) : ℝ)))
-  -- Positivity of per-round dimensions
-  (h_den_pos : ∀ i < k, 0 < (2 * m_seq 0) / 2^i)
+  (h_r : ∀ i < k, UniformFin μ (m_seq i) (r_seq i))
   (S_seq : ∀ i : ℕ, Ω → Finset (Fin (m_seq i + m_seq i)))
-  (h_S_card : ∀ i < k, ∀ ω, (S_seq i ω).card = s i)
-  (hS_unif : ∀ i < k, ∀ A : Finset (Fin (m_seq i + m_seq i)), A.card = s i →
-      μ {ω | S_seq i ω = A} = (1 : ENNReal) / ((Nat.choose (2 * m_seq i) (s i) : ℕ) : ENNReal)) :
+  (h_S_card : ∀ i < k, ∀ ω, (S_seq i ω).card = params.s i)
+  (hS_unif : ∀ i < k, ∀ A : Finset (Fin (m_seq i + m_seq i)), A.card = params.s i →
+      μ {ω | S_seq i ω = A} = (1 : ENNReal) / ((Nat.choose (2 * m_seq i) (params.s i) : ℕ) : ENNReal)) :
   -- Conclusion: bad event probability is bounded
-  -- Blueprint notation: ε = (3/2·q + k)/|F| + k·exp(-η·q/n)
-  -- where 1/|F| = 1 - d/m (failure probability per challenge) and n = 2·m_seq 0
-  let F : ℝ := (m_seq 0 : ℝ) / ((m_seq 0 : ℝ) - (d : ℝ))  -- Field size proxy: 1/F = 1 - d/m
-  let n : ℝ := 2 * (m_seq 0 : ℝ)  -- Initial dimension
+  let F : ℝ := (m_seq 0 : ℝ) / ((m_seq 0 : ℝ) - (d : ℝ))
+  let n : ℝ := 2 * (m_seq 0 : ℝ)
   μ (⋃ i ∈ Finset.range k,
       friRoundBadEvent (m_seq i) (V_seq i) (V'_seq i) (G_seq i) (r_seq i)
-        (X_seq i) (D_seq i) (y_seq i) (q / 3^i) (S_seq i))
+        (prover.X_seq i) (D_seq i) (prover.y_seq i) (params.q / 3^i) (S_seq i))
     ≤ ENNReal.ofReal
-        (((3 : ℝ) / 2 * (q : ℝ) + (k : ℝ)) * (1 / F) +
-          (k : ℝ) * Real.exp (-(η : ℝ) * (q : ℝ) / n)) :=
+        (((3 : ℝ) / 2 * (params.q : ℝ) + (k : ℝ)) * (1 / F) +
+          (k : ℝ) * Real.exp (-(params.η : ℝ) * (params.q : ℝ) / n)) :=
 by
-  simp only [one_div_div]; set nNat := 2 * m_seq 0
-  let qR i := ((q / 3 ^ i : ℕ) + 1 : ℝ); let A i := qR i * (1 - (d : ℝ) / (m_seq 0 : ℝ))
-  let B i := (1 - (qR i / ((nNat / 2 ^ i : ℕ) : ℝ))) ^ (s i); let p i := A i + B i
+  simp only [one_div_div]
+  set nNat := 2 * m_seq 0
+  let qR i := ((params.q / 3 ^ i : ℕ) + 1 : ℝ)
+  let A i := qR i * (1 - (d : ℝ) / (m_seq 0 : ℝ))
+  let B i := (1 - (qR i / ((nNat / 2 ^ i : ℕ) : ℝ))) ^ (params.s i)
+  let p i := A i + B i
   have hqR_nonneg : ∀ i, 0 ≤ qR i := fun _ => by positivity
-  have hA_nonneg : ∀ i, 0 ≤ A i := fun i => mul_nonneg (hqR_nonneg i) (sub_nonneg.mpr (div_le_one_of_le₀ (mod_cast hd_le_m) (by positivity)))
-  have hB_nonneg : ∀ i < k, 0 ≤ B i := fun i hi => pow_nonneg (sub_nonneg.mpr (div_le_one_of_le₀ (by simpa [qR, nNat] using h_lambda_le_one i hi) (by positivity))) _
-  have hp_nonneg : ∀ i < k, 0 ≤ p i := fun i hi => add_nonneg (hA_nonneg i) (hB_nonneg i hi)
-  have h_round_le : ∀ i < k, μ (friRoundBadEvent (m_seq i) (V_seq i) (V'_seq i) (G_seq i) (r_seq i) (X_seq i) (D_seq i) (y_seq i) (q / 3^i) (S_seq i)) ≤ ENNReal.ofReal (p i) := fun i hi => by
-    have hmi_ne : m_seq i ≠ 0 := fun h => hm0_pos.ne' (by simpa [h] using (h_m_seq i hi).symm)
+  have hA_nonneg : ∀ i, 0 ≤ A i := fun i =>
+    mul_nonneg (hqR_nonneg i)
+      (sub_nonneg.mpr (div_le_one_of_le₀ (mod_cast hd_le_m) (by positivity)))
+  have hB_nonneg : ∀ i < k, 0 ≤ B i := fun i hi =>
+    pow_nonneg (sub_nonneg.mpr (div_le_one_of_le₀
+      (by simpa [qR, nNat] using params.h_lambda i hi) (by positivity))) _
+  have hp_nonneg : ∀ i < k, 0 ≤ p i := fun i hi =>
+    add_nonneg (hA_nonneg i) (hB_nonneg i hi)
+  have h_round_le : ∀ i < k,
+      μ (friRoundBadEvent (m_seq i) (V_seq i) (V'_seq i) (G_seq i) (r_seq i)
+          (prover.X_seq i) (D_seq i) (prover.y_seq i) (params.q / 3^i) (S_seq i))
+        ≤ ENNReal.ofReal (p i) := fun i hi => by
+    have hmi_ne : m_seq i ≠ 0 :=
+      fun h => hdim.pos.ne' (by simpa [h] using (hdim.halving i hi).symm)
     have hmi_pos : 0 < (m_seq i : ℝ) := Nat.cast_pos.mpr (Nat.pos_of_ne_zero hmi_ne)
-    have hmi_le : (m_seq i : ℝ) ≤ (m_seq 0 : ℝ) := mod_cast by simpa [h_m_seq i hi] using Nat.le_mul_of_pos_right (m_seq i) (pow_pos (by decide : 0 < 2) i)
-    have hfrac : (d : ℝ) / (m_seq 0 : ℝ) ≤ (d : ℝ) / (m_seq i : ℝ) := by simpa [div_eq_mul_inv] using mul_le_mul_of_nonneg_left (one_div_le_one_div_of_le hmi_pos hmi_le) (by positivity)
+    have hmi_le : (m_seq i : ℝ) ≤ (m_seq 0 : ℝ) := mod_cast by
+      simpa [hdim.halving i hi] using
+        Nat.le_mul_of_pos_right (m_seq i) (pow_pos (by decide : 0 < 2) i)
+    have hfrac : (d : ℝ) / (m_seq 0 : ℝ) ≤ (d : ℝ) / (m_seq i : ℝ) := by
+      simpa [div_eq_mul_inv] using
+        mul_le_mul_of_nonneg_left (one_div_le_one_div_of_le hmi_pos hmi_le) (by positivity)
     have h_nat_div : 2 * m_seq i = nNat / 2 ^ i := by
-      have : (2 * m_seq i) * 2 ^ i = nNat := by simp [Nat.mul_assoc, h_m_seq i hi, nNat]
+      have : (2 * m_seq i) * 2 ^ i = nNat := by simp [Nat.mul_assoc, hdim.halving i hi, nNat]
       have h_eq' : 2 ^ i * (2 * m_seq i) = nNat := by simp_all [Nat.mul_comm]
-      exact Nat.mul_div_cancel_left (2 * m_seq i) (pow_pos (by decide : 0 < 2) i) ▸ congrArg (· / 2 ^ i) h_eq'
-    have h_den_cast : ((2 * m_seq i : ℕ) : ℝ) = ((nNat / 2 ^ i : ℕ) : ℝ) := congrArg Nat.cast h_nat_div
-    have hper : μ (friRoundBadEvent (m_seq i) (V_seq i) (V'_seq i) (G_seq i) (r_seq i) (X_seq i) (D_seq i) (y_seq i) (q / 3^i) (S_seq i)) ≤ ENNReal.ofReal (qR i * (1 - (d : ℝ) / (m_seq i : ℝ))) + ENNReal.ofReal ((1 - (qR i / ((2 * m_seq i : ℕ) : ℝ))) ^ (s i)) := by simpa [qR] using round_wise_error (V := V_seq i) (V' := V'_seq i) (D := D_seq i) (hT1 := hT1 i hi) (hT2 := hT2 i hi) (G := G_seq i) (hG := hG i hi) (μ := μ) (r := r_seq i) (h_unif := h_r_unif i hi) (X := X_seq i) (y := y_seq i) (q := q / 3^i) (h_q := h_subspace_dist i hi) (s := s i) (S := S_seq i) (h_card := h_S_card i hi) (hS_unif := hS_unif i hi)
-    have hA' : ENNReal.ofReal (qR i * (1 - (d : ℝ) / (m_seq i : ℝ))) ≤ ENNReal.ofReal (A i) := ENNReal.ofReal_le_ofReal (mul_le_mul_of_nonneg_left (sub_le_sub_left hfrac _) (hqR_nonneg i))
-    have hB' : ENNReal.ofReal ((1 - (qR i / ((2 * m_seq i : ℕ) : ℝ))) ^ (s i)) ≤ ENNReal.ofReal (B i) := by simp [B, qR, h_den_cast]
-    simpa [p, A, B, qR, ← ENNReal.ofReal_add (hA_nonneg i) (hB_nonneg i hi)] using hper.trans (add_le_add hA' hB')
-  have h_sum : (∑ i ∈ Finset.range k, μ (friRoundBadEvent (m_seq i) (V_seq i) (V'_seq i) (G_seq i) (r_seq i) (X_seq i) (D_seq i) (y_seq i) (q / 3^i) (S_seq i))) ≤ ENNReal.ofReal (∑ i ∈ Finset.range k, p i) := (Finset.sum_le_sum fun i hi => h_round_le i (Finset.mem_range.mp hi)).trans (by rw [ENNReal.ofReal_sum_of_nonneg fun i hi => hp_nonneg i (Finset.mem_range.mp hi)])
-  have h_geom := geometric_summation (k := k) (η := η) (q := q) (d := d) (m := m_seq 0) (n := nNat) (s := s) (hs := hs) (p := p) (h_pi := fun i _ => by simp [p, A, B, qR, nNat]) (h_d_le_m := hd_le_m) (h_den_pos := fun i hi => by simpa [nNat] using h_den_pos i hi) (h_lambda_le_one := fun i hi => by simpa [nNat] using h_lambda_le_one i hi)
-  exact (measure_biUnion_finset_le _ _).trans (h_sum.trans (ENNReal.ofReal_le_ofReal (by simpa [(by field_simp : ((m_seq 0 : ℝ) - (d : ℝ)) / (m_seq 0 : ℝ) = 1 - (d : ℝ) / (m_seq 0 : ℝ)), nNat] using h_geom)))
+      exact Nat.mul_div_cancel_left (2 * m_seq i) (pow_pos (by decide : 0 < 2) i) ▸
+        congrArg (· / 2 ^ i) h_eq'
+    have h_den_cast : ((2 * m_seq i : ℕ) : ℝ) = ((nNat / 2 ^ i : ℕ) : ℝ) :=
+      congrArg Nat.cast h_nat_div
+    have hper : μ (friRoundBadEvent (m_seq i) (V_seq i) (V'_seq i) (G_seq i) (r_seq i)
+        (prover.X_seq i) (D_seq i) (prover.y_seq i) (params.q / 3^i) (S_seq i))
+          ≤ ENNReal.ofReal (qR i * (1 - (d : ℝ) / (m_seq i : ℝ)))
+            + ENNReal.ofReal ((1 - (qR i / ((2 * m_seq i : ℕ) : ℝ))) ^ (params.s i)) := by
+      simpa [qR] using round_wise_error
+        (V := V_seq i) (V' := V'_seq i) (D := D_seq i) (hstruct := hstruct i hi)
+        (G := G_seq i) (hG := hG i hi) (μ := μ) (r := r_seq i) (h_r := h_r i hi)
+        (X := prover.X_seq i) (y := prover.y_seq i) (q := params.q / 3^i)
+        (h_q := h_subspace_dist i hi) (s := params.s i) (S := S_seq i)
+        (h_card := h_S_card i hi) (hS_unif := hS_unif i hi)
+    have hA' : ENNReal.ofReal (qR i * (1 - (d : ℝ) / (m_seq i : ℝ))) ≤ ENNReal.ofReal (A i) :=
+      ENNReal.ofReal_le_ofReal
+        (mul_le_mul_of_nonneg_left (sub_le_sub_left hfrac _) (hqR_nonneg i))
+    have hB' : ENNReal.ofReal ((1 - (qR i / ((2 * m_seq i : ℕ) : ℝ))) ^ (params.s i))
+        ≤ ENNReal.ofReal (B i) := by
+      simp [B, qR, h_den_cast]
+    simpa [p, A, B, qR, ← ENNReal.ofReal_add (hA_nonneg i) (hB_nonneg i hi)] using
+      hper.trans (add_le_add hA' hB')
+  have h_sum : (∑ i ∈ Finset.range k,
+      μ (friRoundBadEvent (m_seq i) (V_seq i) (V'_seq i) (G_seq i) (r_seq i)
+          (prover.X_seq i) (D_seq i) (prover.y_seq i) (params.q / 3^i) (S_seq i)))
+        ≤ ENNReal.ofReal (∑ i ∈ Finset.range k, p i) :=
+    (Finset.sum_le_sum fun i hi => h_round_le i (Finset.mem_range.mp hi)).trans
+      (by rw [ENNReal.ofReal_sum_of_nonneg fun i hi => hp_nonneg i (Finset.mem_range.mp hi)])
+  have h_geom := geometric_summation
+    (k := k) (η := params.η) (q := params.q) (d := d) (m := m_seq 0) (n := nNat)
+    (s := params.s) (hs := params.hs) (p := p)
+    (h_pi := fun i _ => by simp [p, A, B, qR, nNat])
+    (h_d_le_m := hd_le_m)
+    (h_den_pos := fun i hi => by simpa [nNat] using params.h_den_pos i hi)
+    (h_lambda_le_one := fun i hi => by simpa [nNat] using params.h_lambda i hi)
+  have hsub : ((m_seq 0 : ℝ) - (d : ℝ)) / (m_seq 0 : ℝ) = 1 - (d : ℝ) / (m_seq 0 : ℝ) := by
+    rw [sub_div, div_self (by exact_mod_cast hdim.pos.ne' : (m_seq 0 : ℝ) ≠ 0)]
+  exact (measure_biUnion_finset_le _ _).trans
+    (h_sum.trans (ENNReal.ofReal_le_ofReal (by simpa [hsub, nNat] using h_geom)))
 
-/-- Theorem: FRI Protocol Security (Production Variant)
+/-- Production variant where queries expand deterministically via square roots.
 
-This theorem formalizes the production version of FRI where queries are deterministically
-expanded across rounds via square-root relationships. Each layer's queries are the
-square roots of the previous layer's queries, which (1) doubles the query count each
-round and (2) requires working over a subfield of order 2^m for some m (so the Frobenius
-map x ↦ x² is 2-to-1). This algebraic constraint is implicit in the existence of the
-sqrt_map with the 2-to-1 property below.
-
-Despite this deterministic structure, the soundness bound is IDENTICAL to the original
-`fri_security_complete` because the proof relies only on marginal uniformity of each
-round's queries, not on any independence between rounds. The deterministic relationship
-is documented purely to model production FRI behavior and is NOT used in probability
-calculations. -/
+In deployed FRI over fields of characteristic 2, each layer's query set is the preimage
+of the next layer's queries under squaring (x² maps two points to one). This doubles
+queries each round without additional randomness. The key insight is that soundness
+only requires marginal uniformity at each round—not independence—so the bound matches
+`fri_security_complete` exactly. -/
 theorem fri_security_complete_production
   {α : Type*} [Field α] [DecidableEq α]
-  -- Basic parameters
-  (k η q : ℕ)
-  -- Probability space
-  {Ω : Type*} [MeasurableSpace Ω] (μ : Measure Ω) [IsProbabilityMeasure μ]
-  -- m_seq i is the folded dimension at round i
-  -- n = 2 * m_seq 0 is the initial dimension
-  (m_seq : ℕ → ℕ)
-  (hm0_pos : 0 < m_seq 0)
-  -- FRI dimension schedule: dimension halves each round (m_seq i = m_seq 0 / 2^i)
-  (h_m_seq : ∀ i < k, m_seq i * 2^i = m_seq 0)
+  {k : ℕ} {m_seq : ℕ → ℕ}
+  -- Dimension schedule (bundled)
+  (hdim : FRIDimensionSchedule k m_seq)
   -- FRI subspace sequences
   (V_seq  : ∀ i : ℕ, Submodule α (Fin (m_seq i + m_seq i) → α))
   (V'_seq : ∀ i : ℕ, Submodule α (Fin (m_seq i) → α))
-  -- Diagonal folding coefficients (from def:fri_subspace_structure)
+  -- Diagonal folding coefficients
   (D_seq : ∀ i : ℕ, Fin (m_seq i) → α)
-  -- FRI structural hypotheses: V = T₁V' ⊕ T₂V' where T₁ = [I; I], T₂ = [D; -D]
-  (hT1 : ∀ i < k, ∀ y ∈ V'_seq i,
-      (fun j : Fin (m_seq i + m_seq i) => Fin.addCases y y j) ∈ V_seq i)
-  (hT2 : ∀ i < k, ∀ y ∈ V'_seq i,
-      (fun j : Fin (m_seq i + m_seq i) =>
-        Fin.addCases (fun t => (D_seq i) t * y t) (fun t => - (D_seq i) t * y t) j) ∈ V_seq i)
-  -- Subspace distance condition: 4 * q_i < d'(V'ᵢ) for unique decoding at round i
-  -- where q_i = q / 3^i is the per-round proximity parameter
-  (h_subspace_dist : ∀ i < k, 4 * (q / 3^i) < subspaceDistance (V'_seq i))
-  -- Prover's matrices and oracles (what we're checking)
-  -- NO closeness assumption needed! With the conjunction-based friRoundBadEvent,
-  -- round_wise_error bounds the bad event unconditionally.
-  (X_seq : ∀ i : ℕ, Matrix (Fin (m_seq i)) (Fin 2) α)
-  (y_seq : ∀ i : ℕ, Fin (m_seq i + m_seq i) → α)
-  -- Code matrices for folding checks (one per round due to dimension changes)
+  -- FRI structural hypotheses (bundled per round)
+  (hstruct : ∀ i < k, FRISubspaceStructure (m_seq i) (V_seq i) (V'_seq i) (D_seq i))
+  -- Sampling parameters (bundled)
+  (params : FRISamplingParams k m_seq)
+  -- Subspace distance condition
+  (h_subspace_dist : ∀ i < k, 4 * (params.q / 3^i) < subspaceDistance (V'_seq i))
+  -- Prover's data (bundled)
+  (prover : FRIProverData (α := α) m_seq)
+  -- Code matrices for folding checks
   (G_seq : ∀ i : ℕ, Matrix (Fin (m_seq i)) (Fin 2) α)
-  (d : ℕ) -- Code distance (same for all rounds)
-  (hd_le_m : d ≤ m_seq 0) -- Code distance bounded by initial dimension
+  (d : ℕ)
+  (hd_le_m : d ≤ m_seq 0)
   (hG : ∀ i < k, codeHasDistanceAtLeast (G_seq i) d)
-  -- Random challenge selectors
+  -- Probability space and verifier randomness
+  {Ω : Type*} [MeasurableSpace Ω] (μ : Measure Ω) [IsProbabilityMeasure μ]
   (r_seq : ∀ i : ℕ, Ω → Fin (m_seq i))
-  (h_r_unif : ∀ i < k, ∀ j : Fin (m_seq i),
-      μ {ω | r_seq i ω = j} = (1 : ENNReal) / (m_seq i : ENNReal))
-  -- Sample sets for proximity checks
-  -- Sample sizes follow the geometric growth: s i = η * (3/2)^i
-  (s : ℕ → ℕ)
-  (hs : ∀ i < k, (s i : ℝ) = (η : ℝ) * ((3 : ℝ) / 2) ^ i)
-  -- Lambda condition: per-round proximity parameter bounded by dimension
-  -- (q / 3^i + 1) ≤ (n / 2^i) where n = 2 * m_seq 0
-  (h_lambda_le_one : ∀ i < k, (((q / 3^i : ℕ) + 1 : ℝ) ≤ ((2 * m_seq 0 / 2^i : ℕ) : ℝ)))
-  -- Positivity of per-round dimensions
-  (h_den_pos : ∀ i < k, 0 < (2 * m_seq 0) / 2^i)
-  -- Sample sets (uniformly distributed per round)
+  (h_r : ∀ i < k, UniformFin μ (m_seq i) (r_seq i))
   (S_seq : ∀ i : ℕ, Ω → Finset (Fin (m_seq i + m_seq i)))
-  (h_S_card : ∀ i < k, ∀ ω, (S_seq i ω).card = s i)
-  -- Uniformity of samples for all rounds (preserves marginal distribution)
-  (hS_unif : ∀ i < k, ∀ A : Finset (Fin (m_seq i + m_seq i)), A.card = s i →
-      μ {ω | S_seq i ω = A} = (1 : ENNReal) / ((Nat.choose (2 * m_seq i) (s i) : ℕ) : ENNReal))
-  -- DETERMINISTIC SQUARE-ROOT STRUCTURE (production FRI):
-  -- S_seq i is the deterministic square-root image of S_seq (i+1)
-  -- This models production FRI where queries are expanded deterministically
-  -- while preserving the marginal uniform distribution needed for security bounds
-  --
-  -- Implicit requirement: α must contain a subfield of order 2^m for some m, making
-  -- the Frobenius map x ↦ x² a 2-to-1 correspondence. This is automatically satisfied
-  -- for binary extension fields (F_{2^m}) used in practice, and is encoded by the
-  -- existence of sqrt_map with the 2-to-1 property below.
-  (sqrt_map : ∀ i < (k-1), Fin (m_seq (i+1) + m_seq (i+1)) → Fin (m_seq i + m_seq i))
-  (h_sqrt_map_2to1 : ∀ (i) (hi : i < (k-1)) (y : Fin (m_seq i + m_seq i)),
-      ((Finset.univ.filter (fun x : Fin (m_seq (i+1) + m_seq (i+1)) => sqrt_map i hi x = y)).card = 2))
-  (hS_sqrt_deterministic : ∀ (i) (hi : i < (k-1)) (ω),
-      S_seq i ω = (S_seq (i+1) ω).image (sqrt_map i hi)) :
-  -- Conclusion: bad event probability is bounded (same bound as original)
-  -- Blueprint notation: ε = (3/2·q + k)/|F| + k·exp(-η·q/n)
-  -- where 1/|F| = 1 - d/m (failure probability per challenge) and n = 2·m_seq 0
-  let F : ℝ := (m_seq 0 : ℝ) / ((m_seq 0 : ℝ) - (d : ℝ))  -- Field size proxy: 1/F = 1 - d/m
-  let n : ℝ := 2 * (m_seq 0 : ℝ)  -- Initial dimension
+  (h_S_card : ∀ i < k, ∀ ω, (S_seq i ω).card = params.s i)
+  (hS_unif : ∀ i < k, ∀ A : Finset (Fin (m_seq i + m_seq i)), A.card = params.s i →
+      μ {ω | S_seq i ω = A} = (1 : ENNReal) / ((Nat.choose (2 * m_seq i) (params.s i) : ℕ) : ENNReal))
+  -- Deterministic square-root expansion: S_seq i contains both square roots of each point in S_seq (i+1)
+  (sq_map : ∀ i < (k-1), Fin (m_seq i + m_seq i) → Fin (m_seq (i+1) + m_seq (i+1)))
+  (h_sq_map_2to1 : ∀ (i) (hi : i < (k-1)) (y : Fin (m_seq (i+1) + m_seq (i+1))),
+      (Finset.univ.filter (fun x : Fin (m_seq i + m_seq i) => sq_map i hi x = y)).card = 2)
+  (hS_sq_deterministic : ∀ (i) (hi : i < (k-1)) (ω),
+      (S_seq i ω).image (sq_map i hi) = S_seq (i+1) ω) :
+  let F : ℝ := (m_seq 0 : ℝ) / ((m_seq 0 : ℝ) - (d : ℝ))
+  let n : ℝ := 2 * (m_seq 0 : ℝ)
   μ (⋃ i ∈ Finset.range k,
       friRoundBadEvent (m_seq i) (V_seq i) (V'_seq i) (G_seq i) (r_seq i)
-        (X_seq i) (D_seq i) (y_seq i) (q / 3^i) (S_seq i))
+        (prover.X_seq i) (D_seq i) (prover.y_seq i) (params.q / 3^i) (S_seq i))
     ≤ ENNReal.ofReal
-        (((3 : ℝ) / 2 * (q : ℝ) + (k : ℝ)) * (1 / F) +
-          (k : ℝ) * Real.exp (-(η : ℝ) * (q : ℝ) / n)) :=
-    fri_security_complete
-      (k := k) (η := η) (q := q) (μ := μ)
-      (m_seq := m_seq) (hm0_pos := hm0_pos) (h_m_seq := h_m_seq)
-      (V_seq := V_seq) (V'_seq := V'_seq) (D_seq := D_seq)
-      (hT1 := hT1) (hT2 := hT2) (h_subspace_dist := h_subspace_dist)
-      (X_seq := X_seq) (y_seq := y_seq) (G_seq := G_seq)
-      (d := d) (hd_le_m := hd_le_m) (hG := hG)
-      (r_seq := r_seq) (h_r_unif := h_r_unif)
-      (s := s) (hs := hs) (h_lambda_le_one := h_lambda_le_one)
-      (h_den_pos := h_den_pos) (S_seq := S_seq)
-      (h_S_card := h_S_card) (hS_unif := hS_unif)
+        (((3 : ℝ) / 2 * (params.q : ℝ) + (k : ℝ)) * (1 / F) +
+          (k : ℝ) * Real.exp (-(params.η : ℝ) * (params.q : ℝ) / n)) :=
+  fri_security_complete hdim V_seq V'_seq D_seq hstruct params h_subspace_dist prover
+    G_seq d hd_le_m hG μ r_seq h_r S_seq h_S_card hS_unif
 
 end ZkLinalg
